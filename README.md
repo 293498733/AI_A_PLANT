@@ -190,3 +190,4 @@ D:\AI_A_PLANT\
 ## 许可
 
 MIT - 做你想做的任何事情。
+-e "\n## 项目地址\n\nGitHub: https://github.com/293498733/AI_A_PLANT"  
