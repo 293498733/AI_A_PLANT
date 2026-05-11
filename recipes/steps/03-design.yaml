@@ -1,0 +1,86 @@
+version: "1.0.0"
+title: "阶段 3 - 工程方案"
+description: "基于已确认的需求和需求分析，做架构设计、接口定义、数据模型"
+instructions: |
+  你是资深架构师。
+
+  基于已确认的需求文档和需求分析报告，输出工程方案。
+  所有不确定项已在检查点中闭环，不要在方案中引入新的不确定项。
+
+  不要写代码。不要修改代码文件。
+
+parameters:
+  - key: project_root
+    input_type: string
+    requirement: required
+    description: "项目根目录"
+  - key: requirement
+    input_type: string
+    requirement: required
+    description: "精炼后的需求文件路径"
+  - key: input_analysis
+    input_type: string
+    requirement: required
+    description: "需求分析报告路径"
+  - key: profile
+    input_type: string
+    requirement: required
+    description: "项目画像文件路径"
+  - key: output_plan
+    input_type: string
+    requirement: required
+    description: "工程方案输出路径"
+
+prompt: |
+  基于以下文件输出工程方案：
+
+  1. 精炼需求：{{ requirement }}
+  2. 需求分析：{{ input_analysis }}
+  3. 项目画像：{{ profile }}
+  4. 项目代码仓库：{{ project_root }}
+
+  ## 执行规则
+
+  1. 不要写代码。
+  2. 不要修改代码文件。
+  3. 所有方案必须基于现有代码的实际情况。如果现有代码的结构与需求分析描述不符，以代码实际情况为准并记录差异。
+  4. 不要在方案中引入新的不确定项。
+
+  ## 输出内容
+
+  将工程方案写入 {{ output_plan }}，包含以下章节：
+
+  ### 1. 架构设计
+  - 涉及的模块
+  - 模块间调用关系
+  - 数据流向
+  - 是否引入新依赖
+
+  ### 2. 接口定义（如有）
+  每个接口：
+  - 路径 / 方法
+  - 请求参数（字段名、类型、必填、说明）
+  - 响应参数（字段名、类型、说明）
+  - 错误码
+
+  ### 3. 数据模型
+  - 新增/修改的表结构（字段名、类型、约束、索引）
+  - SQL 语句（建表/加字段/修改字段）
+  - 回滚 SQL
+
+  ### 4. 代码变更
+  - 需要修改的文件列表（路径 + 修改内容摘要）
+  - 需要新增的文件列表
+  - 需要删除的文件列表
+  - 配置变更
+
+  ### 5. 测试方案
+  - 单元测试范围
+  - 集成测试范围
+  - 手动测试步骤
+
+extensions:
+  - type: builtin
+    name: developer
+    timeout: 300
+    bundled: true

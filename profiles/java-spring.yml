@@ -1,0 +1,114 @@
+# ============================================================
+# Java Spring 项目画像 - 通用模板
+# ============================================================
+# 本文件是初始化时的默认模板。
+# 执行 init-project.ps1 时，AI 会扫描目标项目并自动生成更准确的 profile。
+# 如果目标项目为空，则直接使用本模板。
+# ============================================================
+
+profile: java-spring
+
+description: Java Spring 后端工程通用规则
+
+projectRules:
+  allowGlobalRefactor: false
+  allowDeleteExistingLogic: false
+  allowDbChangeByDefault: false
+  requirePlanBeforeCode: true
+  requireReviewAfterCode: true
+  preferSmallScopedChanges: true
+  protectUserChanges: true
+  commentLanguage: zh-CN
+  logLanguage: zh-CN
+
+backend:
+  language: Java
+  jdk:
+    compileRelease: 17
+  buildTool: Maven
+  packaging: multi-module
+  commonFrameworks:
+    - Spring Boot 3
+    - Spring MVC
+    - Spring Cloud
+    - MyBatis
+    - Lombok
+    - Swagger / OpenAPI annotations
+
+dataAccess:
+  mongodb:
+    enabled: false
+    style:
+      - MongoTemplate
+      - MongoRepository
+  redis:
+    enabled: false
+  mysqlOrJdbc:
+    enabled: true
+    style:
+      - MyBatis mapper
+      - Spring JDBC
+
+layers:
+  - controller
+  - service
+  - dao
+  - mapper
+  - config
+  - dto
+  - vo
+  - po
+  - entity
+
+# 模块分组（初始化时由 AI 扫描项目自动生成）
+moduleGroups: {}
+
+commands:
+  # 编译验证（跳过测试，用于快速检查阶段）
+  compileOnly:
+    - mvn -DskipTests compile
+  # 编译 + 测试（编码完成后必须执行，用于验证无编译错误和回归）
+  build:
+    - mvn clean package
+  # 单独执行测试
+  test:
+    - mvn test
+
+codingRules:
+  scope:
+    - 默认只修改用户指定模块；跨模块修改前先说明原因。
+    - 不做无关格式化、包名调整、批量重命名或全局重构。
+  java:
+    - 保持现有包结构和命名习惯。
+    - 优先复用已有 DTO、PO、DAO、Service、工具类。
+    - 日志使用 slf4j，占位符写法，不拼接敏感信息。
+    - 新增关键逻辑时写中文注释。
+    - 控制台联调用日志优先中文。
+  spring:
+    - Controller 层只做入参出参和路由，业务逻辑放 Service。
+    - 配置项优先使用 application.properties 现有命名方式。
+
+# 受保护路径（初始化时由 AI 扫描项目自动生成更完整列表）
+protectedPaths:
+  - "**/src/main/resources/application-prod.yml"
+  - "**/src/main/resources/application-prod.yaml"
+  - "**/src/main/resources/application.yml"
+  - "**/src/main/resources/application.yaml"
+  - "**/src/main/resources/bootstrap.yml"
+  - "**/src/main/resources/bootstrap.yaml"
+  - "sql/prod/**"
+  - "deploy/**"
+  - "**/Dockerfile"
+
+generatedOrIgnoredPaths:
+  - "**/target/**"
+  - ".idea/**"
+  - ".svn/**"
+  - ".git/**"
+
+reviewRules:
+  afterCodeChange:
+    - 检查是否误改非目标模块。
+    - 检查是否改动 protectedPaths。
+    - 检查日志是否泄露密码、accessKey、token、连接串凭据。
+    - 检查 Mongo/Redis 查询是否有明显全表风险。

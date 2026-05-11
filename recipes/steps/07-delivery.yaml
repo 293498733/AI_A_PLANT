@@ -1,0 +1,76 @@
+version: "1.0.0"
+title: "阶段 7 - 交付"
+description: "输出变更清单，管线结束"
+instructions: |
+  你是交付管理助手。
+
+  汇总全流程产出，输出简洁的交付清单。
+  不做代码修改。
+
+parameters:
+  - key: requirement
+    input_type: string
+    requirement: required
+    description: "精炼后的需求文件路径"
+  - key: input_change_list
+    input_type: string
+    requirement: required
+    description: "变更清单路径"
+  - key: input_build_result
+    input_type: string
+    requirement: required
+    description: "构建结果路径"
+  - key: input_review
+    input_type: string
+    requirement: required
+    description: "审查报告路径"
+  - key: output_delivery
+    input_type: string
+    requirement: required
+    description: "交付清单输出路径"
+
+prompt: |
+  基于以下文件生成交付清单：
+
+  1. 精炼需求：{{ requirement }}
+  2. 变更清单：{{ input_change_list }}
+  3. 构建结果：{{ input_build_result }}
+  4. 审查报告：{{ input_review }}
+
+  ## 执行规则
+
+  1. 不要修改代码文件。
+  2. 不要写代码。
+
+  ## 输出
+
+  将交付清单写入 {{ output_delivery }}：
+
+  ```markdown
+  # 交付清单
+
+  ## 需求
+  （需求名称和简要说明）
+
+  ## 变更文件
+  - 新增：N 个文件
+  - 修改：N 个文件
+  - 删除：N 个文件
+
+  ## 构建验证
+  - 编译：通过/失败
+  - 测试：通过/失败/未运行
+
+  ## 审查结论
+  - 代码审查：通过/有条件通过/不通过
+  - 安全审查：无风险/有风险（见报告）
+
+  ## 待办（如有）
+  - [ ] 需要后续处理的遗留问题
+  ```
+
+extensions:
+  - type: builtin
+    name: developer
+    timeout: 300
+    bundled: true
