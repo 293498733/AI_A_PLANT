@@ -33,6 +33,7 @@
 | Profile 模板 | ✅ 完成 | java-spring.yml |
 | `CLAUDE.md` | ✅ 完成 | 本文件 |
 | `ARCHITECTURE.md` | ✅ 完成 | 架构设计文档 |
+| Bug 修复 | ✅ 完成 | checkpoint 节点 recipe 字段 KeyError (2026-05-11) |
 | `README.md` | ✅ 完成 | 用户手册 |
 | `.gitignore` | ✅ 完成 | Git 忽略规则 |
 | Git 初始化 | ✅ 完成 | 仓库初始化 |

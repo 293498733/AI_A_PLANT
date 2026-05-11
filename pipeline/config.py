@@ -12,8 +12,8 @@ logger = logging.getLogger("ai-dev-flow")
 class StageConfig:
     id: str
     name: str
-    recipe: str
-    max_turns: int
+    recipe: str = ""
+    max_turns: int = 0
     params: dict[str, str] = field(default_factory=dict)
     output_file: str | None = None
     is_checkpoint: bool = False
@@ -49,8 +49,8 @@ def load_pipeline(path: Path) -> PipelineConfig:
         stages.append(StageConfig(
             id=item["id"],
             name=item["name"],
-            recipe=item["recipe"],
-            max_turns=item.get("max_turns", 100),
+            recipe=item.get("recipe", ""),
+            max_turns=item.get("max_turns", 0),
             params=item.get("params", {}),
             output_file=item.get("output_file"),
             is_checkpoint=item.get("is_checkpoint", False),
