@@ -46,6 +46,24 @@ def setup_project(project_path: str, req_file: str | None = None) -> tuple[Path,
     return p, ad, out
 
 
+def _clean_outputs(AD: Path, OUT: Path) -> None:
+    """清除旧的管线产出文件。"""
+    import shutil
+    cleaned = []
+    if OUT.exists():
+        for f in OUT.glob("*.md"):
+            f.unlink()
+            cleaned.append(f.name)
+    # 也清除旧的需求文件和状态文件
+    for name in [".pipeline_stage", ".pipeline_note", "requirement-raw.md", "requirement.md"]:
+        f = AD / name
+        if f.exists():
+            f.unlink()
+            cleaned.append(name)
+    if cleaned:
+        print(f"  已清除: {', '.join(cleaned)}")
+
+
 def expand_params(params: dict[str, str], P: Path, AD: Path, OUT: Path) -> dict[str, str]:
     """将参数模板中的占位符替换为实际路径。"""
     mapping = {
@@ -77,6 +95,7 @@ def main():
     parser.add_argument("--project", "-p", help="目标项目路径")
     parser.add_argument("--req", "-r", help="需求文件路径")
     parser.add_argument("--resume", action="store_true", help="从断点恢复")
+    parser.add_argument("--new", dest="new_run", action="store_true", help="全新运行，清除旧的 .ai-dev 产出")
     parser.add_argument("--from-stage", dest="from_stage", help="从指定阶段开始")
     parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际执行")
     parser.add_argument("--debug", action="store_true", help="调试模式")
@@ -98,6 +117,25 @@ def main():
     # 初始化日志
     logger = init_logger(P, debug=args.debug)
     logger.info(f"项目: {P}")
+
+    # 检测是否为全新需求提交
+    existing_stage = read_stage(AD)
+    has_outputs = list(OUT.glob("*.md")) if OUT.exists() else []
+
+    if args.new_run:
+        _clean_outputs(AD, OUT)
+    elif has_outputs and not existing_stage:
+        # 上一轮已完成，新一轮提交需求 — 提示清理
+        print()
+        print(SEPARATOR)
+        print("  检测到旧的 .ai-dev 产出文件:")
+        for f in sorted(has_outputs):
+            print(f"    - {f.name}")
+        print(SEPARATOR)
+        if ask_boolean("清除旧文件开始全新运行?", default=True):
+            _clean_outputs(AD, OUT)
+        else:
+            print("保留旧文件，继续执行（可能覆盖同名文件）")
 
     # 验证 goose CLI
     try:
