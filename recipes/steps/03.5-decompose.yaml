@@ -1,0 +1,120 @@
+version: "1.0.0"
+title: "阶段 3.5 - 任务拆分"
+description: "将工程方案拆分为原子化的独立执行任务，每个任务可独立在新 AI 会话中执行"
+instructions: |
+  你是任务拆分专家。基于已确认的工程方案，将实施工作拆分为原子化的独立任务。
+
+  拆分原则：
+  1. 每个任务必须足够小，能在 20-60 个 AI turn 内完成
+  2. 每个任务只做一个明确的事情（单一职责）
+  3. 任务之间通过文件依赖，不通过对话上下文
+  4. 基础设施层先于应用层，数据库变更加业务代码
+  5. 每个任务必须附带 context_notes——足够让一个全新 AI 会话理解要做什么
+parameters:
+  - key: requirement
+    input_type: string
+    requirement: required
+    description: "精炼需求文件路径"
+  - key: input_analysis
+    input_type: string
+    requirement: required
+    description: "需求分析报告路径"
+  - key: input_plan
+    input_type: string
+    requirement: required
+    description: "工程方案路径"
+  - key: profile
+    input_type: string
+    requirement: required
+    description: "项目画像文件路径"
+  - key: project_root
+    input_type: string
+    requirement: required
+    description: "项目根目录"
+  - key: output_tasks
+    input_type: string
+    requirement: required
+    description: "任务文件输出路径 (YAML)"
+prompt: |
+  阅读以下文档并扫描项目代码，将实施工作拆分为原子化任务，输出到 {{ output_tasks }}：
+
+  1. 需求文档：{{ requirement }}
+  2. 需求分析：{{ input_analysis }}
+  3. 工程方案：{{ input_plan }}
+  4. 项目画像：{{ profile }}
+  5. 扫描项目代码：{{ project_root }}
+
+  ## 拆分原则
+
+  1. **原子性**：每个任务做一件事，有明确的输入和输出文件
+  2. **可控规模**：每个任务预计 20-60 个 AI turn
+  3. **依赖清晰**：用 depends_on 明确前置任务
+  4. **文件可传递**：列出 input_files（需要读取的文件）和 output_files（需要生成的文件）
+  5. **上下文自包含**：context_notes 必须足够详细，让新 AI 会话仅凭它就能理解该任务的全部意图和约束
+  6. **基础设施优先**：数据库 Schema、公共模块、配置变更先于业务逻辑
+
+  ## 每个任务必须包含
+
+  - id: 唯一标识（如 task-db-schema, task-user-api）
+  - name: 中文任务名
+  - description: 具体做什么（1-2句话）
+  - category: infrastructure | backend-api | frontend | database | config | test
+  - estimated_turns: 预估 turns（20-60）
+  - priority: P0 | P1 | P2
+  - depends_on: 前置任务 ID 列表（可为空）
+  - input_files: 需要读取的现有文件路径（项目根目录的相对路径）
+  - output_files: 需要创建或修改的文件路径
+  - context_notes: 实现上下文说明（这是**最关键**的字段！必须包含：技术选型、关键约束、接口约定、与上下游的契约）
+  - reference_docs: 参考的设计文档名（如 "03-plan.md"）
+  - parallel_group: 可并行组名（可选，独立任务使用相同组名表示可并行）
+
+  ## 输出格式
+
+  将任务列表以 YAML 格式写入 {{ output_tasks }}：
+
+  ```yaml
+  version: "1.0"
+  project: "项目名"
+  created_at: "当前ISO时间"
+  total_estimated_turns: <总和>
+  tasks:
+    - id: task-xxx
+      name: "任务名"
+      description: "具体描述"
+      category: backend-api
+      estimated_turns: 40
+      priority: P0
+      depends_on: []
+      parallel_group: "group1"
+      input_files:
+        - "src/main/resources/application.yml"
+        - "pom.xml"
+      output_files:
+        - "src/main/java/com/example/XxxService.java"
+        - "src/main/java/com/example/XxxController.java"
+      context_notes: |
+        详细实现说明：
+        - 技术选型：Spring Boot + MyBatis
+        - 关键约束：不能修改已有接口路径
+        - 接口约定：POST /api/v1/xxx，JSON 格式
+      reference_docs:
+        - "03-plan.md"
+      retry_limit: 2
+      timeout_minutes: 15
+  ```
+
+  ## 完成后
+
+  输出：
+  ```
+  === 任务拆分完成 ===
+  任务总数: N
+  预估总 turns: M
+  P0 任务数: X
+  可并行组: [group1, group2]
+  ```
+extensions:
+  - type: builtin
+    name: developer
+    timeout: 600
+    bundled: true

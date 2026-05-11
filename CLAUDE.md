@@ -16,27 +16,31 @@
 
 ## 开发状态追踪
 
-### 已实现 (2026-05-11)
+### 已实现 (v3.0.0 — 任务驱动 + 上下文外化)
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| `pipeline/__init__.py` | ✅ 完成 | 包初始化，版本号 2.0.0 |
+| `pipeline/__init__.py` | ✅ v3 | 包初始化，版本号 3.0.0 |
 | `pipeline/logger.py` | ✅ 完成 | 结构化日志，终端+文件双输出，带颜色 |
-| `pipeline/state.py` | ✅ 完成 | .pipeline_stage / .pipeline_note 读写 |
-| `pipeline/config.py` | ✅ 完成 | pipeline.yaml + profile.yml 加载，dataclass 定义 |
-| `pipeline/executor.py` | ✅ v2 | Popen 实时输出透传 + stdout/stderr 日志捕获 |
+| `pipeline/state.py` | ✅ v3 | .pipeline_stage / .pipeline_note / task_state.json 读写 |
+| `pipeline/config.py` | ✅ v3 | StageConfig + TaskConfig + TaskGraphConfig dataclass |
+| `pipeline/executor.py` | ✅ v3 | Popen 实时输出 + run_task() 任务级执行 |
 | `pipeline/checkpoint.py` | ✅ v2 | 人工确认 + 产出文件前 25 行摘要预览 |
-| `pipeline/error_handler.py` | ✅ 完成 | 4 选项错误处理 (retry/fix/note/skip) |
-| `pipeline.py` | ✅ v2 | CLI、旧产出清理、检查点预览、阶段计时、运行摘要、额外文件检测 |
-| `pipeline.yaml` | ✅ 完成 | 8 阶段 + 4 检查点 + output_file 校验 |
-| Recipe 文件 (7个) | ✅ 完成 | 从原项目复制 |
+| `pipeline/error_handler.py` | ✅ v3 | Action + TaskAction 双层级错误处理 |
+| `pipeline/task_state.py` | ✅ 新增 | TaskStateManager：依赖拓扑、状态追踪、崩溃恢复 |
+| `pipeline/task_context.py` | ✅ 新增 | ContextAssembler：任务上下文组装、文件智能读取 |
+| `pipeline/task_graph.py` | ✅ 新增 | 任务图执行器：拓扑排序 + fresh session per task |
+| `pipeline/git_ops.py` | ✅ 新增 | Git 自动提交、pre-task stash、commit hash |
+| `pipeline.py` | ✅ v3 | CLI、任务图路由、阶段计时、运行摘要 |
+| `pipeline.yaml` | ✅ v3 | 11 阶段：+Phase 3.5(拆分) + checkpoint_c2 + task_graph |
+| Recipe 文件 (9个) | ✅ v3 | 新增 03.5-decompose.yaml + task-template.yaml |
 | Profile 模板 | ✅ 完成 | java-spring.yml |
 | `CLAUDE.md` | ✅ 完成 | 本文件 |
 | `ARCHITECTURE.md` | ✅ 完成 | 架构设计文档 |
 | `README.md` | ✅ 完成 | 用户手册 |
 | `requirements.txt` | ✅ 完成 | pyyaml>=6.0 |
 | `.gitignore` | ✅ 完成 | Git 忽略规则 |
-| Git 初始化 | ✅ 完成 | 仓库初始化 |
+| Git 初始化 | ✅ 完成 | 仓库初始化 + GitHub push |
 
 ### 已修复 Bug
 
@@ -60,12 +64,12 @@
 
 | 优先级 | 任务 | 说明 |
 |--------|------|------|
-| **P0** | 集成测试 | 用 testproj 做端到端测试 |
+| **P0** | 集成测试 | 用 testproj 做端到端测试，验证任务图执行 |
 | **P1** | `--ci` 模式 | 跳过所有人工检查点，自动使用默认选择 |
-| **P1** | 上下文共享 | 阶段间传递摘要，减少重复读取 |
-| **P2** | 并发安全 | 防止同一项目重复执行管线 |
+| **P1** | 多任务并行 | independent tasks 在 parallel_group 内并行执行 |
+| **P2** | 多代理审查 | Phase 6 使用独立 AI 视角进行审查（非自审） |
+| **P2** | 质量评分 | 5 维加权评分 (正确性/测试/质量/安全/性能) |
 | **P3** | Web Dashboard | 可选的 Web 界面查看管线状态 |
-| **P3** | 多项目并行 | 同时管理多个项目的管线 |
 
 ---
 
@@ -74,8 +78,6 @@
 ### ADR-001: 选择 Python 替代 Bat
 
 **决策**：编排引擎从 Windows Batch 改为 Python 3.9+。
-
-**原因**：代码复用、数据结构化、可测试性、中文编码。
 
 ### ADR-002: Recipe 文件保持不变
 
@@ -87,9 +89,19 @@
 
 ### ADR-004: Popen 替代 subprocess.run
 
-**决策**：executor 使用 `subprocess.Popen` + 逐行读取 stdout，替代 `subprocess.run(capture_output=False)`。
+**决策**：executor 使用 `subprocess.Popen` + 逐行读取 stdout。
 
-**原因**：run() 直接透传终端但不写日志；Popen 可以逐行同时打印终端和写入日志，便于回溯。
+### ADR-005: 任务驱动 + 上下文外化 (v3.0.0)
+
+**决策**：将单体 Phase 4（200 turns）替换为任务图执行引擎。每个任务在全新 goose 会话中执行，上下文仅通过文件传递。
+
+**原因**：
+- 上下文退化：单会话在 turn 60-80 后开始退化，无法支撑中大型项目的 8+ 子系统
+- 可恢复性：任务级状态追踪允许从任意任务恢复，而非整阶段重跑
+- 可审计性：每个任务产出一个 git commit，变更可追溯
+- 可并行性：独立任务可在 parallel_group 内并行执行（P1）
+
+**权衡**：AI 无法利用之前的对话上下文，所有信息必须外化到 context_notes 和文件中。这要求任务拆分阶段（Phase 3.5）产出高质量的 context_notes。
 
 ---
 

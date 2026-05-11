@@ -105,3 +105,78 @@ def run_stage(
         stdout="",
         stderr="\n".join(stderr_lines),
     )
+
+
+def run_task(
+    recipe: str,
+    max_turns: int,
+    params: dict[str, str],
+    cwd: Path,
+    timeout_minutes: int = 15,
+) -> subprocess.CompletedProcess:
+    """执行单个任务。与 run_stage 相同流程，但附加超时控制。"""
+    recipe_name = Path(recipe).name
+    args = [
+        "goose", "run",
+        "--recipe", recipe,
+        "--max-turns", str(max_turns),
+    ]
+    args.extend(build_params(params))
+
+    logger.info(f"task: goose run --recipe {recipe_name} --max-turns {max_turns}")
+    logger.debug(f"task params: {params}")
+
+    try:
+        proc = subprocess.Popen(
+            args,
+            cwd=str(cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except FileNotFoundError:
+        raise GooseNotFound("goose CLI not found in PATH")
+
+    stderr_lines: list[str] = []
+
+    def _read_stderr():
+        for line in proc.stderr:
+            stripped = line.rstrip()
+            if stripped:
+                stderr_lines.append(stripped)
+                logger.warning(f"[goose] {stripped}")
+
+    stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+    stderr_thread.start()
+
+    for raw_line in proc.stdout:
+        line = raw_line.rstrip()
+        if line:
+            print(line, flush=True)
+            logger.debug(f"[goose] {line}")
+
+    try:
+        proc.wait(timeout=timeout_minutes * 60)
+    except subprocess.TimeoutExpired:
+        logger.error(f"Task timed out after {timeout_minutes} minutes")
+        proc.kill()
+        proc.wait()
+        stderr_thread.join(timeout=5)
+        return subprocess.CompletedProcess(
+            args=args, returncode=-1,
+            stdout="", stderr=f"Timeout after {timeout_minutes} minutes"
+        )
+
+    stderr_thread.join(timeout=5)
+
+    if proc.returncode != 0:
+        logger.error(f"goose exited with code {proc.returncode}")
+
+    return subprocess.CompletedProcess(
+        args=args,
+        returncode=proc.returncode,
+        stdout="",
+        stderr="\n".join(stderr_lines),
+    )

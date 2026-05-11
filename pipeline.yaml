@@ -76,20 +76,46 @@ stages:
     state_value: checkpoint_c_done
 
   # ============================================================
-  # Phase 4: 编码实现
+  # Phase 3.5: 任务拆分
   # ============================================================
-  - id: phase4
-    name: "编码实现"
-    recipe: recipes/steps/04-implement.yaml
-    max_turns: 200
+  - id: phase3_5
+    name: "任务拆分"
+    recipe: recipes/steps/03.5-decompose.yaml
+    max_turns: 80
     params:
       requirement: "{AD}/requirement.md"
-      profile: "{AD}/profile.yml"
       input_analysis: "{OUT}/02-analysis.md"
-      input_engineering_plan: "{OUT}/03-plan.md"
-      output_change_list: "{OUT}/04-change-list.md"
-    output_file: "{OUT}/04-change-list.md"
-    state_value: implement_done
+      input_plan: "{OUT}/03-plan.md"
+      profile: "{AD}/profile.yml"
+      project_root: "{P}"
+      output_tasks: "{AD}/tasks.yaml"
+    output_file: "{AD}/tasks.yaml"
+    state_value: decompose_done
+
+  # ============================================================
+  # Checkpoint C2: 确认任务拆分
+  # ============================================================
+  - id: checkpoint_c2
+    name: "确认任务拆分"
+    is_checkpoint: true
+    checkpoint_prompt: "请查看 {AD}/tasks.yaml，逐条确认任务拆分合理后按 Enter 继续。可按需调整任务顺序、增删任务。"
+    state_value: checkpoint_c2_done
+
+  # ============================================================
+  # Task Graph: 任务图执行（逐任务 fresh session）
+  # ============================================================
+  - id: task_graph
+    name: "任务图执行"
+    is_task_graph: true
+    recipe: ""
+    max_turns: 0
+    params:
+      tasks_file: "{AD}/tasks.yaml"
+      project_root: "{P}"
+      ai_dev_dir: "{AD}"
+      task_recipe: "recipes/steps/task-template.yaml"
+    output_file: ""
+    state_value: tasks_done
 
   # ============================================================
   # Phase 5: 编译 + 测试
@@ -101,6 +127,7 @@ stages:
     params:
       project_root: "{P}"
       profile: "{AD}/profile.yml"
+      tasks_file: "{AD}/tasks.yaml"
       output_result: "{OUT}/05-build.md"
     output_file: "{OUT}/05-build.md"
     state_value: build_done
@@ -117,7 +144,7 @@ stages:
       requirement: "{AD}/requirement.md"
       input_analysis: "{OUT}/02-analysis.md"
       input_engineering_plan: "{OUT}/03-plan.md"
-      input_change_list: "{OUT}/04-change-list.md"
+      tasks_file: "{AD}/tasks.yaml"
       input_build_result: "{OUT}/05-build.md"
       profile: "{AD}/profile.yml"
       output_review: "{OUT}/06-review.md"
@@ -142,7 +169,7 @@ stages:
     max_turns: 40
     params:
       requirement: "{AD}/requirement.md"
-      input_change_list: "{OUT}/04-change-list.md"
+      tasks_file: "{AD}/tasks.yaml"
       input_build_result: "{OUT}/05-build.md"
       input_review: "{OUT}/06-review.md"
       output_delivery: "{OUT}/07-delivery.md"
