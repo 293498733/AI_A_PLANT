@@ -56,7 +56,7 @@ stages:
   - id: phase3
     name: "工程方案"
     recipe: recipes/steps/03-design.yaml
-    max_turns: 100
+    max_turns: 120
     params:
       project_root: "{P}"
       requirement: "{AD}/requirement.md"
