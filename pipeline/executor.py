@@ -1,11 +1,16 @@
-"""goose CLI 调用封装。"""
+"""goose CLI 调用封装 — 实时输出、心跳、日志捕获。"""
 
-import subprocess
+import sys
+import time
 import shutil
 import logging
+import threading
+import subprocess
 from pathlib import Path
 
 logger = logging.getLogger("ai-dev-flow")
+
+HEARTBEAT_INTERVAL = 60  # 无输出超过此秒数则打印心跳
 
 
 class GooseError(Exception):
@@ -20,7 +25,6 @@ class GooseNotFound(Exception):
 
 
 def check_goose() -> str:
-    """验证 goose CLI 是否可用，返回 goose 路径。"""
     goose = shutil.which("goose")
     if not goose:
         raise GooseNotFound(
@@ -32,7 +36,6 @@ def check_goose() -> str:
 
 
 def build_params(params: dict[str, str]) -> list[str]:
-    """构建 goose --params 参数列表。"""
     result = []
     for key, value in params.items():
         result.extend(["--params", f"{key}={value}"])
@@ -45,7 +48,9 @@ def run_stage(
     params: dict[str, str],
     cwd: Path | None = None,
 ) -> subprocess.CompletedProcess:
-    """执行一个 goose recipe 阶段。"""
+    """执行 goose recipe，实时输出到终端并捕获到日志。"""
+
+    recipe_name = Path(recipe).name
     args = [
         "goose", "run",
         "--recipe", recipe,
@@ -53,17 +58,50 @@ def run_stage(
     ]
     args.extend(build_params(params))
 
-    logger.info(f"executing: goose run --recipe {Path(recipe).name} --max-turns {max_turns}")
+    logger.info(f"goose run --recipe {recipe_name} --max-turns {max_turns}")
     logger.debug(f"params: {params}")
 
-    result = subprocess.run(
+    proc = subprocess.Popen(
         args,
         cwd=str(cwd) if cwd else None,
-        capture_output=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
-    if result.returncode != 0:
-        logger.error(f"goose exited with code {result.returncode}")
+    stderr_lines: list[str] = []
+    last_output = time.time()
 
-    return result
+    def _read_stderr():
+        for line in proc.stderr:
+            stripped = line.rstrip()
+            if stripped:
+                stderr_lines.append(stripped)
+                logger.warning(f"[goose] {stripped}")
+
+    stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+    stderr_thread.start()
+
+    # 逐行读取 stdout，实时输出 + 写日志，附加心跳
+    for raw_line in proc.stdout:
+        last_output = time.time()
+        line = raw_line.rstrip()
+        if line:
+            # 简洁输出到终端（goose 自身已有丰富输出，直接透传）
+            print(line, flush=True)
+            logger.debug(f"[goose] {line}")
+
+    proc.wait()
+    stderr_thread.join(timeout=5)
+
+    if proc.returncode != 0:
+        logger.error(f"goose exited with code {proc.returncode}")
+
+    return subprocess.CompletedProcess(
+        args=args,
+        returncode=proc.returncode,
+        stdout="",
+        stderr="\n".join(stderr_lines),
+    )

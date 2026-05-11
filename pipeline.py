@@ -11,6 +11,8 @@
 
 import sys
 import os
+import time
+import shutil
 import argparse
 from pathlib import Path
 
@@ -19,7 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipeline import __version__
-from pipeline.logger import init as init_logger
+from pipeline.logger import init as init_logger, get as get_logger
 from pipeline.config import load_pipeline
 from pipeline.state import (
     read_stage, write_stage, clear_stage,
@@ -32,8 +34,7 @@ from pipeline.error_handler import handle_error, Action
 SEPARATOR = "=" * 60
 
 
-def setup_project(project_path: str, req_file: str | None = None) -> tuple[Path, Path, Path]:
-    """初始化目标项目的 .ai-dev 目录结构。"""
+def setup_project(project_path: str) -> tuple[Path, Path, Path]:
     p = Path(project_path).resolve()
     if not p.exists():
         raise FileNotFoundError(f"项目目录不存在: {p}")
@@ -47,14 +48,12 @@ def setup_project(project_path: str, req_file: str | None = None) -> tuple[Path,
 
 
 def _clean_outputs(AD: Path, OUT: Path) -> None:
-    """清除旧的管线产出文件。"""
-    import shutil
     cleaned = []
     if OUT.exists():
-        for f in OUT.glob("*.md"):
-            f.unlink()
-            cleaned.append(f.name)
-    # 也清除旧的需求文件和状态文件
+        for f in OUT.glob("*"):
+            if f.is_file():
+                f.unlink()
+                cleaned.append(f.name)
     for name in [".pipeline_stage", ".pipeline_note", "requirement-raw.md", "requirement.md"]:
         f = AD / name
         if f.exists():
@@ -65,7 +64,6 @@ def _clean_outputs(AD: Path, OUT: Path) -> None:
 
 
 def expand_params(params: dict[str, str], P: Path, AD: Path, OUT: Path) -> dict[str, str]:
-    """将参数模板中的占位符替换为实际路径。"""
     mapping = {
         "{P}": str(P),
         "{AD}": str(AD),
@@ -79,12 +77,34 @@ def expand_params(params: dict[str, str], P: Path, AD: Path, OUT: Path) -> dict[
     return expanded
 
 
+def _snapshot_outputs(OUT: Path) -> set[str]:
+    """记录当前 outputs/ 中的文件名集合。"""
+    if not OUT.exists():
+        return set()
+    return {f.name for f in OUT.iterdir() if f.is_file()}
+
+
+def _detect_extra_files(OUT: Path, before: set[str], expected: set[str]) -> list[str]:
+    """检测阶段执行后产生的非预期文件。"""
+    after = _snapshot_outputs(OUT)
+    new_files = after - before
+    extra = [f for f in new_files if f not in expected]
+    return extra
+
+
 def banner():
-    """打印启动横幅。"""
     print(SEPARATOR)
     print(f"  AI Dev Flow v{__version__}")
     print("  需求 → 分析 → 方案 → 编码 → 审查 → 交付")
     print(SEPARATOR)
+
+
+def _resolve_output_path(template: str | None, P: Path, AD: Path, OUT: Path) -> Path | None:
+    """将占位符路径解析为实际 Path。"""
+    if not template:
+        return None
+    resolved = expand_params({"_": template}, P, AD, OUT)["_"]
+    return Path(resolved)
 
 
 def main():
@@ -104,7 +124,6 @@ def main():
 
     banner()
 
-    # 交互式输入项目路径
     project_path = args.project
     if not project_path:
         project_path = input("项目路径: ").strip().strip('"')
@@ -113,19 +132,16 @@ def main():
             sys.exit(1)
 
     P, AD, OUT = setup_project(project_path)
-
-    # 初始化日志
     logger = init_logger(P, debug=args.debug)
     logger.info(f"项目: {P}")
 
     # 检测是否为全新需求提交
     existing_stage = read_stage(AD)
-    has_outputs = list(OUT.glob("*.md")) if OUT.exists() else []
+    has_outputs = list(OUT.glob("*")) if OUT.exists() else []
 
     if args.new_run:
         _clean_outputs(AD, OUT)
     elif has_outputs and not existing_stage:
-        # 上一轮已完成，新一轮提交需求 — 提示清理
         print()
         print(SEPARATOR)
         print("  检测到旧的 .ai-dev 产出文件:")
@@ -159,7 +175,6 @@ def main():
     # 处理需求文件
     req_file = args.req
     if not req_file:
-        # 检查上一次运行是否有笔记
         note = read_note(AD)
         if note:
             print()
@@ -174,7 +189,6 @@ def main():
 
         req_file = input("需求文件路径 (留空跳过): ").strip().strip('"')
         if req_file and Path(req_file).exists():
-            import shutil
             dest = AD / "requirement-raw.md"
             shutil.copy(req_file, str(dest))
             logger.info(f"需求文件已复制到 {dest}")
@@ -183,7 +197,6 @@ def main():
     # 确定起始阶段
     current_state = read_stage(AD)
     if args.from_stage:
-        # 从指定阶段开始
         start_idx = 0
         for i, s in enumerate(pipeline.stages):
             if s.id == args.from_stage:
@@ -198,7 +211,7 @@ def main():
             return
         if start_idx > 0:
             prev = pipeline.stages[start_idx - 1]
-            logger.info(f"从断点恢复: {prev.name} 已完成，下一个: {pipeline.stages[start_idx].name}")
+            logger.info(f"从断点恢复: {prev.name} 已完成 → {pipeline.stages[start_idx].name}")
         else:
             logger.info("开始全新管线")
     else:
@@ -213,26 +226,50 @@ def main():
             print(f"  {i+1:2d}. {marker} {s.name}")
         return
 
-    # 执行管线
+    # 执行管线 — 记录各阶段耗时
     total = len(pipeline.stages)
+    stage_times: list[tuple[str, float, str]] = []  # (name, elapsed_sec, status)
+    pipeline_start = time.time()
+
     for i in range(start_idx, total):
         stage = pipeline.stages[i]
         progress = f"[{i+1}/{total}]"
+        stage_start = time.time()
 
         if stage.is_checkpoint:
-            prompt = expand_params({"_": stage.checkpoint_prompt}, P, AD, OUT)["_"]
-            confirm(f"{progress} {stage.name}", prompt, AD)
+            # 查找前一个阶段生成的产出文件作为预览
+            preview_file = None
+            for j in range(i - 1, -1, -1):
+                prev_stage = pipeline.stages[j]
+                if prev_stage.output_file:
+                    preview_file = _resolve_output_path(prev_stage.output_file, P, AD, OUT)
+                    break
+
+            prompt_text = expand_params({"_": stage.checkpoint_prompt}, P, AD, OUT)["_"]
+            confirm(f"{progress} {stage.name}", prompt_text, preview_file)
             write_stage(AD, stage.state_value)
+            elapsed = time.time() - stage_start
+            stage_times.append((stage.name, elapsed, "✅"))
             continue
 
-        # AI 阶段 — 带重试循环
+        # AI 阶段
         expanded_params = expand_params(stage.params, P, AD, OUT)
         recipe_path = str(PROJECT_ROOT / stage.recipe)
+        before_files = _snapshot_outputs(OUT)
+
+        # 预期文件集合
+        expected_names = set()
+        if stage.output_file:
+            expected_path = _resolve_output_path(stage.output_file, P, AD, OUT)
+            if expected_path:
+                expected_names.add(expected_path.name)
 
         while True:
             print()
             print(SEPARATOR)
             print(f"  {progress} {stage.name}")
+            print(SEPARATOR)
+            print(f"  启动 goose (max {stage.max_turns} turns)...")
             print(SEPARATOR)
 
             try:
@@ -243,27 +280,53 @@ def main():
                     cwd=P,
                 )
 
+                print()
+
                 if result.returncode == 0:
-                    # 验证输出文件
+                    # 验证预期输出文件
+                    missing = []
                     if stage.output_file:
-                        output_path = Path(expand_params(
-                            {"_": stage.output_file}, P, AD, OUT
-                        )["_"])
-                        if not output_path.exists():
-                            logger.warning(f"阶段完成但未生成预期文件: {output_path}")
-                    write_stage(AD, stage.state_value)
-                    logger.info(f"{stage.name} — 完成")
-                    break
+                        output_path = _resolve_output_path(stage.output_file, P, AD, OUT)
+                        if output_path and not output_path.exists():
+                            logger.warning(f"未生成预期文件: {output_path}")
+                            missing.append(output_path.name)
+
+                    # 检测额外产出文件
+                    extra = _detect_extra_files(OUT, before_files, expected_names)
+                    if extra:
+                        logger.warning(f"检测到非预期产出文件: {extra}")
+                        print(f"  [注意] AI 额外生成了非预期文件: {', '.join(extra)}")
+
+                    if missing:
+                        logger.error(f"缺少预期文件: {missing}")
+                        action = handle_error(AD)
+                        if action == Action.RETRY:
+                            continue
+                        elif action == Action.NOTE_EXIT:
+                            return
+                        elif action == Action.SKIP:
+                            write_stage(AD, stage.state_value)
+                            elapsed = time.time() - stage_start
+                            stage_times.append((stage.name, elapsed, "⚠️ 跳过"))
+                            break
+                    else:
+                        write_stage(AD, stage.state_value)
+                        elapsed = time.time() - stage_start
+                        mins = int(elapsed // 60)
+                        secs = int(elapsed % 60)
+                        logger.info(f"{stage.name} — 完成 ({mins}m{secs}s)")
+                        stage_times.append((stage.name, elapsed, "✅"))
+                        break
                 else:
                     action = handle_error(AD)
                     if action == Action.RETRY:
                         continue
                     elif action == Action.NOTE_EXIT:
-                        logger.info("已保存笔记，退出。下次运行将从该阶段继续。")
                         return
                     elif action == Action.SKIP:
                         write_stage(AD, stage.state_value)
-                        logger.warning(f"{stage.name} — 已跳过")
+                        elapsed = time.time() - stage_start
+                        stage_times.append((stage.name, elapsed, "⚠️ 跳过"))
                         break
 
             except Exception as e:
@@ -275,14 +338,46 @@ def main():
                     return
                 elif action == Action.SKIP:
                     write_stage(AD, stage.state_value)
+                    elapsed = time.time() - stage_start
+                    stage_times.append((stage.name, elapsed, "⚠️ 异常"))
                     break
 
-    # 全部完成
+    # 全部完成 — 打印运行摘要
+    total_elapsed = time.time() - pipeline_start
+    clear_stage(AD)
+
     print()
     print(SEPARATOR)
     print("  管线全部完成!")
     print(SEPARATOR)
-    clear_stage(AD)
+    _print_summary(stage_times, total_elapsed, OUT)
+
+
+def _print_summary(stage_times: list[tuple[str, float, str]], total_elapsed: float, OUT: Path) -> None:
+    """打印运行摘要。"""
+    total_m = int(total_elapsed // 60)
+    total_s = int(total_elapsed % 60)
+    print()
+    print(SEPARATOR)
+    print(f"  运行摘要  (总耗时 {total_m}m{total_s}s)")
+    print(SEPARATOR)
+    for name, elapsed, status in stage_times:
+        mins = int(elapsed // 60)
+        secs = int(elapsed % 60)
+        print(f"  {status}  {name:<12s}  {mins}m{secs}s")
+    print(SEPARATOR)
+
+    # 列出最终产出物
+    if OUT.exists():
+        outputs = sorted(OUT.iterdir())
+        if outputs:
+            print()
+            print("  最终产出物:")
+            for f in outputs:
+                if f.is_file():
+                    size_kb = f.stat().st_size // 1024
+                    print(f"    - {f.name} ({size_kb}KB)")
+            print()
 
 
 if __name__ == "__main__":
