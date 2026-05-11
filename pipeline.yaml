@@ -38,6 +38,7 @@ stages:
       requirement: "{AD}/requirement.md"
       profile: "{AD}/profile.yml"
       output_analysis: "{OUT}/02-analysis.md"
+    output_file: "{OUT}/02-analysis.md"
     state_value: analysis_done
 
   # ============================================================
@@ -62,6 +63,7 @@ stages:
       input_analysis: "{OUT}/02-analysis.md"
       profile: "{AD}/profile.yml"
       output_plan: "{OUT}/03-plan.md"
+    output_file: "{OUT}/03-plan.md"
     state_value: design_done
 
   # ============================================================
@@ -86,6 +88,7 @@ stages:
       input_analysis: "{OUT}/02-analysis.md"
       input_engineering_plan: "{OUT}/03-plan.md"
       output_change_list: "{OUT}/04-change-list.md"
+    output_file: "{OUT}/04-change-list.md"
     state_value: implement_done
 
   # ============================================================
@@ -99,6 +102,7 @@ stages:
       project_root: "{P}"
       profile: "{AD}/profile.yml"
       output_result: "{OUT}/05-build.md"
+    output_file: "{OUT}/05-build.md"
     state_value: build_done
 
   # ============================================================
@@ -117,6 +121,7 @@ stages:
       input_build_result: "{OUT}/05-build.md"
       profile: "{AD}/profile.yml"
       output_review: "{OUT}/06-review.md"
+    output_file: "{OUT}/06-review.md"
     state_value: review_done
 
   # ============================================================
@@ -141,4 +146,5 @@ stages:
       input_build_result: "{OUT}/05-build.md"
       input_review: "{OUT}/06-review.md"
       output_delivery: "{OUT}/07-delivery.md"
+    output_file: "{OUT}/07-delivery.md"
     state_value: done
