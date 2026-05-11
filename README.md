@@ -22,7 +22,9 @@ Phase 2 ─── 需求分析 (拆功能点、数据流、不确定项)
   ⚠ 检查点 B ─ 闭环不确定项
 Phase 3 ─── 工程方案 (架构设计、接口定义、数据模型)
   ⚠ 检查点 C ─ 确认方案
-Phase 4 ─── 编码实现 (AI 写代码，200 turns)
+Phase 3.5 ─ 任务拆分 (AI 拆分为原子任务，含 context_notes)
+  ⚠ 检查点 C2 ─ 确认任务拆分合理性
+█████████ 任务图执行 (每个任务 = 全新AI会话 + git commit) █████████
 Phase 5 ─── 编译 + 测试
 Phase 6 ─── 代码 + 安全审查
   ⚠ 检查点 D ─ 安全确认（仅高危暂停）
@@ -78,18 +80,26 @@ python pipeline.py --project D:/MyPrj/my-project --dry-run
 
 任何原因中断（Ctrl+C、关机、goose 崩溃），重新运行相同命令即可从断点继续。
 
-**原理**：项目目录下的 `.ai-dev/.pipeline_stage` 记录了当前进度。
+**原理**：项目目录下的 `.ai-dev/.pipeline_stage` 记录全局进度，`task_state.json` 记录每个任务的完成状态。
+
+### 任务驱动 + 上下文外化 (v3.0.0)
+
+大项目不再用一个 AI 会话硬写所有代码。Phase 3.5 将工程方案拆分为原子任务（`tasks.yaml`），每个任务：
+- 在**全新 goose 会话**中执行（20-60 turns），不依赖对话记忆
+- 上下文完全来自**文件**（input_files + reference_docs + context_notes）
+- 完成后**自动 git commit**，变更可追溯
+- 崩溃后从**失败任务继续**，而非整阶段重跑
 
 ### 错误处理
 
-每个 AI 阶段失败时提供 4 个选项：
+每个 AI 阶段失败时提供 4 个选项；任务图执行阶段提供独立的 4 选项：
 
 | 选项 | 行为 | 适用场景 |
 |------|------|---------|
 | 1) retry | 原地重试 | 网络波动 |
-| 2) fix | 手动修改后重试 | 编译错误 |
+| 2) fix/skip | 手动修改后重试 / 跳过该任务 | 编译错误 / 已手动完成 |
 | 3) write note | 写说明笔记并退出 | 问题复杂，晚点处理 |
-| 4) skip | 跳过该阶段 | 已手动完成 |
+| 4) skip/abort | 跳过该阶段 / 终止任务图 | 不可恢复的错误 |
 
 ---
 
@@ -100,7 +110,7 @@ ai-dev-flow/
 ├── pipeline.py              ← 入口
 ├── pipeline.yaml            ← 阶段定义
 ├── pipeline/                ← 编排引擎
-├── recipes/steps/           ← AI 阶段定义 (7 个 YAML)
+├── recipes/steps/           ← AI 阶段定义 (9 个 YAML)
 ├── profiles/                ← 项目画像模板
 ├── ARCHITECTURE.md          ← 架构设计
 └── CLAUDE.md                ← 开发进度
