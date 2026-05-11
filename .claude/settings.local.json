@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tasklist)",
+      "Bash(wmic process *)",
+      "Bash(ps -p 5252 -o pid,etime,args)",
+      "Bash(ps -p 23728 -o pid,etime,args)",
+      "Bash(git push *)"
+    ]
+  }
+}
