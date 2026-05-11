@@ -27,8 +27,8 @@
 | `pipeline/executor.py` | ✅ 完成 | goose CLI 调用封装，参数构建 |
 | `pipeline/checkpoint.py` | ✅ 完成 | 人工确认交互 |
 | `pipeline/error_handler.py` | ✅ 完成 | 4 选项错误处理 (retry/fix/note/skip) |
-| `pipeline.yaml` | ✅ 完成 | 8 阶段 + 4 检查点定义，数据驱动 |
-| `pipeline.py` | ✅ 完成 | CLI 入口，argparse，主循环 |
+| `pipeline.py` | ✅ 完成 | CLI 入口，argparse，主循环，旧产出自动检测清理 + --new |
+| `pipeline.yaml` | ✅ 完成 | 8 阶段 + 4 检查点 + output_file 校验 |
 | Recipe 文件 (7个) | ✅ 完成 | 从原项目复制 |
 | Profile 模板 | ✅ 完成 | java-spring.yml |
 | `CLAUDE.md` | ✅ 完成 | 本文件 |
