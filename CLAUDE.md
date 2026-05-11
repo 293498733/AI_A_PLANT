@@ -34,6 +34,9 @@
 | `CLAUDE.md` | ✅ 完成 | 本文件 |
 | `ARCHITECTURE.md` | ✅ 完成 | 架构设计文档 |
 | Bug 修复 | ✅ 完成 | checkpoint 节点 recipe 字段 KeyError (2026-05-11) |
+| Bug 修复 | ✅ 完成 | Phase 2-7 缺少 output_file 校验，导致 03-plan.md 缺失未被发现 (2026-05-11) |
+| Bug 发现 | 🔴 已知 | AI 会额外生成非预期文件 (02-review-report.md, 03-change-list.md, 04-build-report.md) |
+| Bug 发现 | 🔴 已知 | goose 进程退出后未清理，存在僵尸进程堆积 |
 | `README.md` | ✅ 完成 | 用户手册 |
 | `.gitignore` | ✅ 完成 | Git 忽略规则 |
 | Git 初始化 | ✅ 完成 | 仓库初始化 |
