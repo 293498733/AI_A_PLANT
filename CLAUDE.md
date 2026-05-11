@@ -24,32 +24,45 @@
 | `pipeline/logger.py` | ✅ 完成 | 结构化日志，终端+文件双输出，带颜色 |
 | `pipeline/state.py` | ✅ 完成 | .pipeline_stage / .pipeline_note 读写 |
 | `pipeline/config.py` | ✅ 完成 | pipeline.yaml + profile.yml 加载，dataclass 定义 |
-| `pipeline/executor.py` | ✅ 完成 | goose CLI 调用封装，参数构建 |
-| `pipeline/checkpoint.py` | ✅ 完成 | 人工确认交互 |
+| `pipeline/executor.py` | ✅ v2 | Popen 实时输出透传 + stdout/stderr 日志捕获 |
+| `pipeline/checkpoint.py` | ✅ v2 | 人工确认 + 产出文件前 25 行摘要预览 |
 | `pipeline/error_handler.py` | ✅ 完成 | 4 选项错误处理 (retry/fix/note/skip) |
-| `pipeline.py` | ✅ 完成 | CLI 入口，argparse，主循环，旧产出自动检测清理 + --new |
+| `pipeline.py` | ✅ v2 | CLI、旧产出清理、检查点预览、阶段计时、运行摘要、额外文件检测 |
 | `pipeline.yaml` | ✅ 完成 | 8 阶段 + 4 检查点 + output_file 校验 |
 | Recipe 文件 (7个) | ✅ 完成 | 从原项目复制 |
 | Profile 模板 | ✅ 完成 | java-spring.yml |
 | `CLAUDE.md` | ✅ 完成 | 本文件 |
 | `ARCHITECTURE.md` | ✅ 完成 | 架构设计文档 |
-| Bug 修复 | ✅ 完成 | checkpoint 节点 recipe 字段 KeyError (2026-05-11) |
-| Bug 修复 | ✅ 完成 | Phase 2-7 缺少 output_file 校验，导致 03-plan.md 缺失未被发现 (2026-05-11) |
-| Bug 发现 | 🔴 已知 | AI 会额外生成非预期文件 (02-review-report.md, 03-change-list.md, 04-build-report.md) |
-| Bug 发现 | 🔴 已知 | goose 进程退出后未清理，存在僵尸进程堆积 |
 | `README.md` | ✅ 完成 | 用户手册 |
+| `requirements.txt` | ✅ 完成 | pyyaml>=6.0 |
 | `.gitignore` | ✅ 完成 | Git 忽略规则 |
 | Git 初始化 | ✅ 完成 | 仓库初始化 |
+
+### 已修复 Bug
+
+| Bug | 状态 | 说明 |
+|-----|------|------|
+| checkpoint KeyError | ✅ 已修复 | recipe 字段改为可选 (2026-05-11) |
+| output_file 校验缺失 | ✅ 已修复 | Phase 2-7 补全 (2026-05-11) |
+| 旧产出残留 | ✅ 已修复 | 自动检测 + 提示清理 + --new 参数 (2026-05-11) |
+| 进度不可见 | ✅ 已修复 | executor 实时透传 goose 输出 (2026-05-11) |
+| 检查点盲确认 | ✅ 已修复 | 展示产出文件前 25 行摘要 (2026-05-11) |
+| 无运行摘要 | ✅ 已修复 | 完成后打印阶段耗时 + 产出物清单 (2026-05-11) |
+| AI 额外产出文件 | ✅ 已检测 | 阶段后对比 snapshot，警告非预期文件 (2026-05-11) |
+
+### 已知问题
+
+| 问题 | 状态 | 说明 |
+|------|------|------|
+| goose 僵尸进程 | 🔴 暂缓 | 用户同时运行多个 goose，暂不确定是否管线导致 |
 
 ### 待实现（按优先级）
 
 | 优先级 | 任务 | 说明 |
 |--------|------|------|
-| **P0** | 依赖声明 | 创建 `requirements.txt` (PyYAML) |
 | **P0** | 集成测试 | 用 testproj 做端到端测试 |
 | **P1** | `--ci` 模式 | 跳过所有人工检查点，自动使用默认选择 |
 | **P1** | 上下文共享 | 阶段间传递摘要，减少重复读取 |
-| **P2** | 阶段耗时统计 | 记录每个阶段的执行时间，定位瓶颈 |
 | **P2** | 并发安全 | 防止同一项目重复执行管线 |
 | **P3** | Web Dashboard | 可选的 Web 界面查看管线状态 |
 | **P3** | 多项目并行 | 同时管理多个项目的管线 |
@@ -62,25 +75,21 @@
 
 **决策**：编排引擎从 Windows Batch 改为 Python 3.9+。
 
-**原因**：
-- 代码复用：Bat 中 7 个 phase 是 copy-paste，Python 用一个循环解决
-- 数据结构化：状态机、阶段定义全部用 dataclass，加新阶段只改 YAML
-- 可测试性：核心逻辑可单测，Bat 无法测试
-- 中文编码：Python 天然 UTF-8，无 PowerShell/Bat 的编码问题
-
-**权衡**：增加了 Python 依赖（原方案零依赖），但 Python 是开发者的标准工具。
+**原因**：代码复用、数据结构化、可测试性、中文编码。
 
 ### ADR-002: Recipe 文件保持不变
 
 **决策**：YAML Recipe 格式和内容不修改，作为稳定接口层。
 
-**原因**：Recipe 是 AI 的"操作手册"，格式已经过验证且与 goose CLI 深度绑定。重构的重点是编排层，不是 Recipe 层。
-
 ### ADR-003: 数据驱动阶段定义
 
 **决策**：阶段定义从 Bat 中的 goto 标签迁移到 `pipeline.yaml`。
 
-**原因**：添加新阶段只需改 YAML 配置，无需修改任何 Python 代码。
+### ADR-004: Popen 替代 subprocess.run
+
+**决策**：executor 使用 `subprocess.Popen` + 逐行读取 stdout，替代 `subprocess.run(capture_output=False)`。
+
+**原因**：run() 直接透传终端但不写日志；Popen 可以逐行同时打印终端和写入日志，便于回溯。
 
 ---
 
@@ -98,7 +107,6 @@
 - **所有功能添加必须更新 CLAUDE.md** 的开发状态追踪表格
 - 重大设计决策写入「架构决策记录」
 - 代码风格：Python 标准，type hints，无过度抽象
-- 测试：`pipeline/tests/` 目录下
 - 不修改 `recipes/` 目录中的 YAML 文件（除非 goose 版本升级需要适配）
 
 ### 环境要求
