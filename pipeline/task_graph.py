@@ -1,0 +1,268 @@
+"""任务图执行器 — 依赖拓扑排序 + 逐任务 fresh session 执行。"""
+
+import time
+import logging
+from pathlib import Path
+
+from pipeline.config import TaskGraphConfig, TaskConfig, load_task_graph
+from pipeline.task_state import (
+    TaskStateManager, STATUS_PENDING, STATUS_COMPLETED,
+    STATUS_FAILED, STATUS_SKIPPED,
+)
+from pipeline.task_context import ContextAssembler
+from pipeline.git_ops import GitOps
+from pipeline.executor import run_task
+from pipeline.error_handler import handle_task_error, TaskAction
+
+logger = logging.getLogger("ai-dev-flow")
+
+SEPARATOR = "=" * 60
+
+
+def execute_task_graph(
+    project_root: Path,
+    ai_dev_dir: Path,
+    tasks_file: Path,
+    profile_path: Path,
+    task_recipe: str = "recipes/steps/task-template.yaml",
+) -> tuple[bool, dict]:
+    """执行任务图。
+
+    Returns:
+        (success, results_dict) — success=True 表示所有任务完成或跳过
+    """
+    graph = load_task_graph(tasks_file)
+    tasks: dict[str, TaskConfig] = {t.id: t for t in graph.tasks}
+    task_ids = list(tasks.keys())
+
+    # 检测循环依赖
+    cycle = _detect_cycle(tasks)
+    if cycle:
+        logger.error(f"Circular dependency detected: {' -> '.join(cycle)}")
+        return False, {}
+
+    # 初始化状态管理器
+    state_mgr = TaskStateManager(ai_dev_dir, task_ids)
+    state_mgr.reset_in_progress()  # 崩溃恢复
+
+    context_asm = ContextAssembler(project_root, ai_dev_dir)
+    try:
+        git = GitOps(project_root)
+        git_available = True
+    except RuntimeError:
+        logger.warning("Not a git repository — auto-commit disabled")
+        git = None
+        git_available = False
+
+    print()
+    print(SEPARATOR)
+    print(f"  任务图执行 — {len(graph.tasks)} 个任务")
+    print(f"  预估总 turns: {graph.total_estimated_turns}")
+    print(SEPARATOR)
+
+    total = len(graph.tasks)
+    while True:
+        # 计算已完成集合
+        completed_ids: set[str] = set()
+        for tid, tr in state_mgr.tasks.items():
+            if tr["status"] in (STATUS_COMPLETED, STATUS_SKIPPED):
+                completed_ids.add(tid)
+
+        # 找就绪任务
+        ready = []
+        for tid in task_ids:
+            tr = state_mgr.tasks[tid]
+            if tr["status"] != STATUS_PENDING:
+                continue
+            task = tasks[tid]
+            if all(dep in completed_ids for dep in task.depends_on):
+                ready.append(tid)
+
+        # 检查是否全部完成
+        if not ready:
+            done, _, failed = state_mgr.progress()
+            if done >= total:
+                print()
+                print(SEPARATOR)
+                print(f"  任务图完成 — {done}/{total} 任务")
+                print(SEPARATOR)
+                return True, state_mgr.tasks
+            elif failed > 0 and all(
+                state_mgr.tasks[tid]["status"] == STATUS_FAILED
+                for tid in ready if tid in state_mgr.tasks
+            ):
+                # 有失败任务且没有就绪任务
+                logger.error("Task graph blocked by failures")
+                return False, state_mgr.tasks
+            else:
+                # Deadlock check
+                pending = [tid for tid in task_ids
+                           if state_mgr.tasks[tid]["status"] == STATUS_PENDING
+                           and tid not in ready]
+                # Check if pending tasks are truly blocked
+                blocked = []
+                for tid in pending:
+                    task = tasks[tid]
+                    unmet = [dep for dep in task.depends_on if dep not in completed_ids]
+                    if any(state_mgr.tasks[dep]["status"] == STATUS_FAILED for dep in unmet):
+                        blocked.append(tid)
+                if blocked:
+                    logger.error(f"Tasks blocked by failed dependencies: {blocked}")
+                return False, state_mgr.tasks
+
+        # 排序：P0 优先，estimated_turns 小的优先
+        def _sort_key(tid):
+            t = tasks[tid]
+            p = 0 if t.priority == "P0" else (1 if t.priority == "P1" else 2)
+            return (p, t.estimated_turns)
+        ready.sort(key=_sort_key)
+
+        # 执行就绪任务（单线程顺序执行）
+        for tid in ready:
+            task = tasks[tid]
+            tr = state_mgr.tasks[tid]
+
+            print()
+            print(SEPARATOR)
+            print(f"  [{len(completed_ids)+1}/{total}] {task.name} ({task.id})")
+            print(f"  分类: {task.category} | 优先级: {task.priority} | 预估: {task.estimated_turns}turns")
+            print(SEPARATOR)
+
+            # Git pre-check
+            if git_available and git:
+                git.pre_task_check()
+
+            # 上下文组装
+            ctx = context_asm.assemble(task)
+            context_text = context_asm.render_prompt(task, ctx)
+
+            # 构建参数
+            params = {
+                "task_name": task.name,
+                "task_description": task.description,
+                "task_context_notes": task.context_notes,
+                "project_root": str(project_root),
+                "profile": str(profile_path),
+                "context_file": _write_context_file(ai_dev_dir, tid, context_text),
+            }
+
+            state_mgr.mark_in_progress(tid)
+            state_mgr.save()
+
+            task_start = time.time()
+
+            try:
+                result = run_task(
+                    recipe=str(Path(__file__).resolve().parent.parent / task_recipe),
+                    max_turns=task.estimated_turns,
+                    params=params,
+                    cwd=project_root,
+                    timeout_minutes=task.timeout_minutes,
+                )
+
+                elapsed = int(time.time() - task_start)
+                mins, secs = divmod(elapsed, 60)
+
+                if result.returncode == 0:
+                    # 验证输出文件
+                    missing = [f for f in task.output_files
+                               if not (project_root / f).exists()]
+                    if missing:
+                        logger.warning(f"Task {tid} completed but missing: {missing}")
+                        # 仍然标记完成，但记录警告
+                        state_mgr.mark_completed(tid, "", task.output_files)
+                        state_mgr.save()
+                        print(f"  ⚠️ 完成 ({mins}m{secs}s) — 但缺少文件: {missing}")
+                    else:
+                        # Git commit
+                        commit_hash = ""
+                        if git_available and git:
+                            commit_hash = git.commit_task(
+                                tid, task.name, task.category,
+                                task.priority, task.estimated_turns
+                            ) or ""
+                        state_mgr.mark_completed(tid, commit_hash, task.output_files)
+                        state_mgr.save()
+                        print(f"  ✅ 完成 ({mins}m{secs}s)" +
+                              (f" — {commit_hash}" if commit_hash else ""))
+                    completed_ids.add(tid)
+                else:
+                    state_mgr.mark_failed(tid,
+                        f"goose exit {result.returncode}: {result.stderr[:200]}")
+                    state_mgr.save()
+                    print(f"  ❌ 失败 ({mins}m{secs}s)")
+
+                    action = handle_task_error(
+                        tid, task.name, tr["retries"],
+                        task.retry_limit, ai_dev_dir
+                    )
+
+                    if action == TaskAction.RETRY_TASK:
+                        state_mgr.tasks[tid]["status"] = STATUS_PENDING
+                        state_mgr.tasks[tid]["started_at"] = None
+                        state_mgr.save()
+                        break  # 重新计算 ready 列表
+                    elif action == TaskAction.SKIP_TASK:
+                        state_mgr.mark_skipped(tid, "Human skipped")
+                        state_mgr.save()
+                        completed_ids.add(tid)
+                    elif action == TaskAction.ABORT_GRAPH:
+                        return False, state_mgr.tasks
+                    elif action == TaskAction.NOTE_EXIT:
+                        return False, state_mgr.tasks
+
+            except Exception as e:
+                logger.error(f"Task {tid} exception: {e}")
+                state_mgr.mark_failed(tid, str(e))
+                state_mgr.save()
+                action = handle_task_error(
+                    tid, task.name, tr["retries"],
+                    task.retry_limit, ai_dev_dir
+                )
+                if action == TaskAction.RETRY_TASK:
+                    state_mgr.tasks[tid]["status"] = STATUS_PENDING
+                    state_mgr.save()
+                    break
+                elif action == TaskAction.ABORT_GRAPH:
+                    return False, state_mgr.tasks
+                elif action == TaskAction.NOTE_EXIT:
+                    return False, state_mgr.tasks
+
+    return True, state_mgr.tasks
+
+
+def _write_context_file(ai_dev_dir: Path, task_id: str, context_text: str) -> str:
+    """将组装好的上下文写入临时文件，供 goose session 读取。"""
+    ctx_dir = ai_dev_dir / "task_contexts"
+    ctx_dir.mkdir(exist_ok=True)
+    ctx_file = ctx_dir / f"{task_id}.md"
+    ctx_file.write_text(context_text, encoding="utf-8")
+    return str(ctx_file)
+
+
+def _detect_cycle(tasks: dict[str, TaskConfig]) -> list[str] | None:
+    """DFS 检测循环依赖。返回循环路径或 None。"""
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = {tid: WHITE for tid in tasks}
+
+    def dfs(node, path):
+        color[node] = GRAY
+        for dep in tasks[node].depends_on:
+            if dep not in color:
+                continue  # 外部依赖，跳过
+            if color[dep] == GRAY:
+                cycle_start = path.index(dep)
+                return path[cycle_start:] + [dep]
+            if color[dep] == WHITE:
+                result = dfs(dep, path + [dep])
+                if result:
+                    return result
+        color[node] = BLACK
+        return None
+
+    for tid in tasks:
+        if color[tid] == WHITE:
+            result = dfs(tid, [tid])
+            if result:
+                return result
+    return None

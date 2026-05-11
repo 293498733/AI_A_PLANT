@@ -30,6 +30,7 @@ from pipeline.state import (
 from pipeline.executor import check_goose, run_stage, GooseError, GooseNotFound
 from pipeline.checkpoint import confirm, ask_boolean
 from pipeline.error_handler import handle_error, Action
+from pipeline.task_graph import execute_task_graph
 
 SEPARATOR = "=" * 60
 
@@ -251,6 +252,54 @@ def main():
             elapsed = time.time() - stage_start
             stage_times.append((stage.name, elapsed, "✅"))
             continue
+
+        # Task Graph 阶段 — 路由到任务图执行器
+        if stage.is_task_graph:
+            expanded_params = expand_params(stage.params, P, AD, OUT)
+            tasks_file = Path(expanded_params["tasks_file"])
+            if not tasks_file.exists():
+                logger.error(f"tasks.yaml 不存在: {tasks_file}")
+                action = handle_error(AD)
+                if action == Action.SKIP:
+                    write_stage(AD, stage.state_value)
+                    stage_times.append((stage.name, 0, "⚠️ 跳过"))
+                    continue
+                else:
+                    return
+
+            print()
+            print(SEPARATOR)
+            print(f"  {progress} {stage.name}")
+            print(SEPARATOR)
+
+            task_start = time.time()
+            success, _ = execute_task_graph(
+                project_root=P,
+                ai_dev_dir=AD,
+                tasks_file=tasks_file,
+                profile_path=AD / "profile.yml",
+                task_recipe=expanded_params.get("task_recipe",
+                    "recipes/steps/task-template.yaml"),
+            )
+
+            if success:
+                write_stage(AD, stage.state_value)
+                elapsed = time.time() - task_start
+                mins, secs = divmod(int(elapsed), 60)
+                logger.info(f"任务图执行完成 ({mins}m{secs}s)")
+                stage_times.append((stage.name, elapsed, "✅"))
+                continue
+            else:
+                action = handle_error(AD)
+                if action == Action.RETRY:
+                    continue
+                elif action == Action.NOTE_EXIT:
+                    return
+                elif action == Action.SKIP:
+                    write_stage(AD, stage.state_value)
+                    elapsed = time.time() - task_start
+                    stage_times.append((stage.name, elapsed, "⚠️ 跳过"))
+                    continue
 
         # AI 阶段
         expanded_params = expand_params(stage.params, P, AD, OUT)
