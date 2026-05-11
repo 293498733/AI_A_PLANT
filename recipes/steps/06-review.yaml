@@ -1,0 +1,115 @@
+version: "1.0.0"
+title: "阶段 6 - 审查（代码 + 安全）"
+description: "合并代码审查和安全审查，核对待办项"
+instructions: |
+  你是一个代码审查 + 安全审查专家。
+
+  同时做代码审查和安全审查，一次性输出完整的审查报告。
+  不涉及文件修改，只做审查。
+
+parameters:
+  - key: project_root
+    input_type: string
+    requirement: required
+    description: "项目根目录"
+  - key: requirement
+    input_type: string
+    requirement: required
+    description: "精炼后的需求文件路径"
+  - key: input_analysis
+    input_type: string
+    requirement: required
+    description: "需求分析报告路径"
+  - key: input_engineering_plan
+    input_type: string
+    requirement: required
+    description: "工程方案路径"
+  - key: input_change_list
+    input_type: string
+    requirement: required
+    description: "变更清单路径"
+  - key: input_build_result
+    input_type: string
+    requirement: required
+    description: "构建结果路径"
+  - key: profile
+    input_type: string
+    requirement: required
+    description: "项目画像文件路径"
+  - key: output_review
+    input_type: string
+    requirement: required
+    description: "审查报告输出路径"
+
+prompt: |
+  基于以下文件进行审查：
+
+  1. 精炼需求：{{ requirement }}
+  2. 需求分析：{{ input_analysis }}
+  3. 工程方案：{{ input_engineering_plan }}
+  4. 变更清单：{{ input_change_list }}
+  5. 构建结果：{{ input_build_result }}
+  6. 项目画像：{{ profile }}
+  7. 项目代码仓库：{{ project_root }}
+
+  ## 执行规则
+
+  1. 不要修改文件。
+  2. 不要写代码。
+  3. 只做审查，输出报告。
+
+  ## 审查内容
+
+  将结果写入 {{ output_review }}，包含以下章节：
+
+  ### A. 代码审查
+
+  #### A1. 变更与需求一致性
+  逐条核对变更清单中的每个修改是否对应需求文档中的功能点：
+  - [ ] 功能 A — 已实现/未实现/部分实现
+  - [ ] 功能 B — 已实现/未实现/部分实现
+
+  #### A2. 变更与工程方案一致性
+  核对实际代码变更是否与工程方案一致：
+  - [ ] 接口定义一致
+  - [ ] 数据模型一致
+  - [ ] 无未列入方案的变更
+
+  #### A3. 代码质量
+  - 编码规范一致性
+  - 命名规范
+  - 注释完整度
+  - 重复代码
+
+  ### B. 安全审查
+
+  #### B1. 暴露面
+  - 新增接口是否有鉴权
+  - 是否有敏感信息泄露风险
+  - 是否有未授权访问路径
+
+  #### B2. 注入安全
+  - SQL 注入
+  - 命令注入
+  - XSS
+
+  #### B3. 凭据处理
+  - 密码/密钥是否硬编码
+  - 敏感配置是否泄露
+
+  #### B4. 风险等级
+  - critical（必须修复）
+  - high（强烈建议修复）
+  - medium（建议修复）
+  - low（可忽略）
+
+  ### C. 总结
+  - 审查结论：通过/有条件通过/不通过
+  - 需要修复的问题列表
+  - 是否建议合并
+
+extensions:
+  - type: builtin
+    name: developer
+    timeout: 600
+    bundled: true

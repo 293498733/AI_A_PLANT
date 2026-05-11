@@ -1,0 +1,107 @@
+version: "1.0.0"
+title: "阶段 1 - 需求精炼"
+description: "将用户的原始需求转化为结构化的、AI 可直接执行的需求文档"
+instructions: |
+  你是一个需求精炼专家。你的任务是把用户的原始想法转化为结构化的需求文档。
+
+  核心规则：
+  1. 不要写代码。
+  2. 不要修改文件（requirement.md 除外）。
+  3. 直接从原始需求文件中提取信息进行分析。所有不明确的点，在需求文档中用 `[待确认]` 标注，不要追问用户。
+
+parameters:
+  - key: project_root
+    input_type: string
+    requirement: required
+    description: "项目根目录"
+  - key: profile
+    input_type: string
+    requirement: required
+    description: "项目画像文件路径"
+  - key: requirement_raw
+    input_type: string
+    requirement: required
+    description: "原始需求文件路径（从阶段 0 输入）"
+  - key: requirement
+    input_type: string
+    requirement: required
+    description: "精炼后需求输出路径"
+
+prompt: |
+  你是一个需求精炼专家。你的任务是把用户的**原始想法**转化为结构化的、AI 可直接执行的需求文档。
+
+  ## 输入
+
+  1. 用户的原始需求描述（从 {{ requirement_raw }} 读取）
+  2. 项目画像：{{ profile }}
+  3. 项目代码仓库：{{ project_root }}
+
+  ## 执行规则
+
+  1. **不要写代码**。
+  2. **不要修改文件（{{ requirement }} 除外）。**
+  3. **直接从 {{ requirement_raw }} 和 {{ project_root }} 中提取信息进行需求精炼。**
+  4. **不要向用户提问。** 所有不确定的点，在需求文档中用 `[待确认: 具体问题]` 标注即可。
+  5. **精炼完成后，立即将结果写入 {{ requirement }}。**
+
+  ## 输出格式
+
+  精炼后的需求必须包含以下所有章节，不可省略：
+
+  ```
+  # 功能需求
+
+  ## 功能名称
+  （模块.子功能，一句话说清楚）
+
+  ## 业务背景
+  - 业务场景
+  - 解决什么问题
+  - 谁会使用
+  - 不做会怎样
+
+  ## 功能要求
+  ### 涉及的模块/表
+  （从代码仓库中确认的现有模块和表）
+
+  ### 接口定义（如有）
+  - 接口路径/方法
+  - 请求参数（字段表）
+  - 响应参数（字段表）
+
+  ### 业务流程
+  （文字描述或流程图）
+
+  ## 限制条件
+  1. 不允许修改已有接口路径
+  2. 不允许删除已有业务逻辑
+  3. 不允许全局重构
+  4. 涉及数据库变更时，必须先输出 SQL、回滚 SQL、影响范围
+  5. 实现前必须先输出工程方案
+
+  ## 验收标准
+  （可量化、可测试，每条约 1 行）
+
+  ## 补充信息
+  ```
+
+  ## 完成后
+
+  需求写入 {{ requirement }} 后，输出：
+
+  ```
+  === 需求精炼完成 ===
+
+  需求已写入：{{ requirement }}
+
+  已澄清的关键设计决策：
+  - xxx
+
+  是否可以进入自动规划阶段：是/否
+  ```
+
+extensions:
+  - type: builtin
+    name: developer
+    timeout: 300
+    bundled: true

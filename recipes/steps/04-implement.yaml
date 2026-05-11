@@ -1,0 +1,70 @@
+version: "1.0.0"
+title: "阶段 4 - 编码实现"
+description: "基于精炼需求、分析和工程方案，实施代码变更"
+instructions: |
+  你是一个资深开发工程师。你的任务是基于已有的需求分析、产品评审和工程方案，精确实施代码变更。
+
+  编码要求：
+  1. 只修改工程方案中列出的相关文件。
+  2. 禁止全局重构。
+  3. 禁止删除已有业务逻辑。
+  4. 禁止修改受保护路径。
+  5. 保持当前项目代码风格。
+  6. 如果发现工程方案与代码实际情况不一致，立即停止，不要强行修改。记录差异。
+  7. 修改完成后，必须输出实际修改文件清单和测试步骤。
+
+parameters:
+  - key: requirement
+    input_type: string
+    requirement: required
+    description: "精炼后的需求文件路径"
+  - key: profile
+    input_type: string
+    requirement: required
+    description: "项目画像文件路径"
+  - key: input_analysis
+    input_type: string
+    requirement: required
+    description: "需求分析报告路径"
+  - key: input_engineering_plan
+    input_type: string
+    requirement: required
+    description: "工程方案路径"
+  - key: output_change_list
+    input_type: string
+    requirement: required
+    description: "变更清单输出路径"
+
+prompt: |
+  请基于以下文件开始编码实现：
+
+  1. 需求：{{ requirement }}
+  2. 需求分析：{{ input_analysis }}
+  3. 工程方案：{{ input_engineering_plan }}
+  4. 项目画像：{{ profile }}
+  5. 项目根目录在工程方案和画像中已描述，直接参考即可
+
+  编码要求：
+  1. 只修改工程方案中列出的相关文件。
+  2. 禁止全局重构。
+  3. 禁止删除已有业务逻辑。
+  4. 禁止修改受保护路径。
+  5. 保持当前项目代码风格。
+  6. 如果发现工程方案与代码实际情况不一致，立即停止，不要强行修改。
+  7. 修改完成后，必须输出实际修改文件清单和测试步骤到 {{ output_change_list }}。
+
+  请将变更说明输出到：
+  {{ output_change_list }}
+
+  变更清单结构：
+  - 修改的文件清单（路径+修改摘要）
+  - 新增的文件清单
+  - 删除的文件清单
+  - 数据库变更（如有）
+  - 测试步骤
+
+extensions:
+  - type: builtin
+    name: developer
+    timeout: 600
+    bundled: true

@@ -1,0 +1,144 @@
+# AI 全流程开发管线 — 阶段定义
+# 添加新阶段只需在此文件中新增条目，无需修改任何 Python 代码。
+
+stages:
+  # ============================================================
+  # Phase 1: 需求精炼
+  # ============================================================
+  - id: phase1
+    name: "需求精炼"
+    recipe: recipes/steps/01-refine-requirement.yaml
+    max_turns: 80
+    params:
+      project_root: "{P}"
+      profile: "{AD}/profile.yml"
+      requirement_raw: "{AD}/requirement-raw.md"
+      requirement: "{AD}/requirement.md"
+    output_file: "{AD}/requirement.md"
+    state_value: refine_done
+
+  # ============================================================
+  # Checkpoint A: 确认需求
+  # ============================================================
+  - id: checkpoint_a
+    name: "确认需求"
+    is_checkpoint: true
+    checkpoint_prompt: "请查看 {AD}/requirement.md，确认需求文档无误后按 Enter 继续"
+    state_value: checkpoint_a_done
+
+  # ============================================================
+  # Phase 2: 需求分析
+  # ============================================================
+  - id: phase2
+    name: "需求分析"
+    recipe: recipes/steps/02-analysis.yaml
+    max_turns: 100
+    params:
+      project_root: "{P}"
+      requirement: "{AD}/requirement.md"
+      profile: "{AD}/profile.yml"
+      output_analysis: "{OUT}/02-analysis.md"
+    state_value: analysis_done
+
+  # ============================================================
+  # Checkpoint B: 闭环不确定项
+  # ============================================================
+  - id: checkpoint_b
+    name: "闭环不确定项"
+    is_checkpoint: true
+    checkpoint_prompt: "请查看 {OUT}/02-analysis.md，逐条确认不确定项后按 Enter 继续"
+    state_value: checkpoint_b_done
+
+  # ============================================================
+  # Phase 3: 工程方案
+  # ============================================================
+  - id: phase3
+    name: "工程方案"
+    recipe: recipes/steps/03-design.yaml
+    max_turns: 100
+    params:
+      project_root: "{P}"
+      requirement: "{AD}/requirement.md"
+      input_analysis: "{OUT}/02-analysis.md"
+      profile: "{AD}/profile.yml"
+      output_plan: "{OUT}/03-plan.md"
+    state_value: design_done
+
+  # ============================================================
+  # Checkpoint C: 确认方案
+  # ============================================================
+  - id: checkpoint_c
+    name: "确认方案"
+    is_checkpoint: true
+    checkpoint_prompt: "请查看 {OUT}/03-plan.md，确认方案可行后按 Enter 继续"
+    state_value: checkpoint_c_done
+
+  # ============================================================
+  # Phase 4: 编码实现
+  # ============================================================
+  - id: phase4
+    name: "编码实现"
+    recipe: recipes/steps/04-implement.yaml
+    max_turns: 200
+    params:
+      requirement: "{AD}/requirement.md"
+      profile: "{AD}/profile.yml"
+      input_analysis: "{OUT}/02-analysis.md"
+      input_engineering_plan: "{OUT}/03-plan.md"
+      output_change_list: "{OUT}/04-change-list.md"
+    state_value: implement_done
+
+  # ============================================================
+  # Phase 5: 编译 + 测试
+  # ============================================================
+  - id: phase5
+    name: "编译与测试"
+    recipe: recipes/steps/05-build.yaml
+    max_turns: 60
+    params:
+      project_root: "{P}"
+      profile: "{AD}/profile.yml"
+      output_result: "{OUT}/05-build.md"
+    state_value: build_done
+
+  # ============================================================
+  # Phase 6: 代码 + 安全审查
+  # ============================================================
+  - id: phase6
+    name: "代码与安全审查"
+    recipe: recipes/steps/06-review.yaml
+    max_turns: 80
+    params:
+      project_root: "{P}"
+      requirement: "{AD}/requirement.md"
+      input_analysis: "{OUT}/02-analysis.md"
+      input_engineering_plan: "{OUT}/03-plan.md"
+      input_change_list: "{OUT}/04-change-list.md"
+      input_build_result: "{OUT}/05-build.md"
+      profile: "{AD}/profile.yml"
+      output_review: "{OUT}/06-review.md"
+    state_value: review_done
+
+  # ============================================================
+  # Checkpoint D: 安全确认
+  # ============================================================
+  - id: checkpoint_d
+    name: "安全确认"
+    is_checkpoint: true
+    checkpoint_prompt: "请查看 {OUT}/06-review.md，确认无高危风险后按 Enter 继续"
+    state_value: checkpoint_d_done
+
+  # ============================================================
+  # Phase 7: 交付
+  # ============================================================
+  - id: phase7
+    name: "交付"
+    recipe: recipes/steps/07-delivery.yaml
+    max_turns: 40
+    params:
+      requirement: "{AD}/requirement.md"
+      input_change_list: "{OUT}/04-change-list.md"
+      input_build_result: "{OUT}/05-build.md"
+      input_review: "{OUT}/06-review.md"
+      output_delivery: "{OUT}/07-delivery.md"
+    state_value: done
