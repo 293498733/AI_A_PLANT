@@ -1,0 +1,13 @@
+#!/bin/sh
+# 自动为检查点提交添加上下文信息
+# 安装: cp .githooks/prepare-commit-msg .git/hooks/ && chmod +x .git/hooks/prepare-commit-msg
+
+COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2
+
+if [ "$COMMIT_SOURCE" != "message" ]; then
+  # 获取当前分支和最近的状态
+  BRANCH=$(git branch --show-current)
+  echo "" >> "$COMMIT_MSG_FILE"
+  echo "[auto-checkpoint] branch: $BRANCH" >> "$COMMIT_MSG_FILE"
+fi
