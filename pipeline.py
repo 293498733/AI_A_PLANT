@@ -28,8 +28,8 @@ from pipeline.state import (
     read_note, write_note, clear_note,
 )
 from pipeline.executor import check_goose, run_stage, GooseError, GooseNotFound
-from pipeline.checkpoint import confirm, ask_boolean
-from pipeline.error_handler import handle_error, Action
+from pipeline.checkpoint import confirm, ask_boolean, set_ci_mode as set_checkpoint_ci
+from pipeline.error_handler import handle_error, Action, set_ci_mode as set_error_ci
 from pipeline.task_graph import execute_task_graph
 
 SEPARATOR = "=" * 60
@@ -120,13 +120,21 @@ def main():
     parser.add_argument("--from-stage", dest="from_stage", help="从指定阶段开始")
     parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际执行")
     parser.add_argument("--debug", action="store_true", help="调试模式")
+    parser.add_argument("--ci", action="store_true", help="CI 模式，跳过所有人工交互，自动使用默认选择")
     parser.add_argument("--version", action="version", version=f"ai-dev-flow v{__version__}")
     args = parser.parse_args()
+
+    if args.ci:
+        set_checkpoint_ci(True)
+        set_error_ci(True)
 
     banner()
 
     project_path = args.project
     if not project_path:
+        if args.ci:
+            print("错误: CI 模式需要指定 --project")
+            sys.exit(1)
         project_path = input("项目路径: ").strip().strip('"')
         if not project_path:
             print("错误: 未指定项目路径")
@@ -135,6 +143,18 @@ def main():
     P, AD, OUT = setup_project(project_path)
     logger = init_logger(P, debug=args.debug)
     logger.info(f"项目: {P}")
+
+    # 检测项目画像是否存在，不存在则强制从 Phase 0 开始
+    profile_path = AD / "profile.yml"
+    profile_missing = not profile_path.exists()
+    if profile_missing:
+        logger.info("项目画像不存在，将从 Phase 0 项目初始化开始")
+        if not args.ci:
+            print()
+            print(SEPARATOR)
+            print("  项目画像文件 (profile.yml) 不存在。")
+            print("  将首先运行 Phase 0 — 自动扫描项目生成画像。")
+            print(SEPARATOR)
 
     # 检测是否为全新需求提交
     existing_stage = read_stage(AD)
@@ -183,12 +203,16 @@ def main():
             print("  上次运行的笔记:")
             print(f"  {note}")
             print(SEPARATOR)
-            if ask_boolean("清除笔记并继续?"):
+            choice = input("清除笔记并继续? (Y/n/保留笔记继续=q): ").strip().lower()
+            if choice in ("", "y", "yes"):
                 clear_note(AD)
+            elif choice in ("q", "keep"):
+                logger.info("保留笔记，继续执行")
             else:
                 sys.exit(1)
 
-        req_file = input("需求文件路径 (留空跳过): ").strip().strip('"')
+        if not args.ci:
+            req_file = input("需求文件路径 (留空跳过): ").strip().strip('"')
         if req_file and Path(req_file).exists():
             dest = AD / "requirement-raw.md"
             shutil.copy(req_file, str(dest))
@@ -204,6 +228,9 @@ def main():
                 start_idx = i
                 break
         logger.info(f"从指定阶段开始: {pipeline.stages[start_idx].name}")
+    elif profile_missing:
+        start_idx = 0  # 强制从 Phase 0 开始
+        logger.info("从 Phase 0 项目初始化开始（profile.yml 不存在）")
     elif current_state:
         start_idx = pipeline.find_resume_index(current_state)
         if start_idx >= len(pipeline.stages):

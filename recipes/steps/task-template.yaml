@@ -2,9 +2,10 @@ version: "1.0.0"
 title: "Task - {{ task_name }}"
 description: "执行单个原子开发任务。仅依赖文件上下文，不依赖对话记忆。"
 instructions: |
-  你正在执行一个**独立的原子开发任务**。
+  你正在执行一个独立的原子开发任务。
   你拥有完成任务所需的全部上下文（已通过参数注入）。
   不要超出任务范围。不要修改 output_files 之外的文件。
+
 parameters:
   - key: task_name
     input_type: string
@@ -14,10 +15,6 @@ parameters:
     input_type: string
     requirement: required
     description: "任务描述"
-  - key: task_context_notes
-    input_type: string
-    requirement: required
-    description: "实现上下文说明（技术选型、约束、接口约定等）"
   - key: project_root
     input_type: string
     requirement: required
@@ -29,35 +26,47 @@ parameters:
   - key: context_file
     input_type: string
     requirement: required
-    description: "上下文文件路径（包含 input_files 和 reference_docs 内容）"
+    description: "完整的任务上下文文件路径"
+
 prompt: |
   ## 你的任务：{{ task_name }}
 
   {{ task_description }}
 
-  ## 实现上下文
+  ## 项目信息
 
-  {{ task_context_notes }}
+  项目根目录：{{ project_root }}
+  项目画像：{{ profile }}
 
   ## 执行规则
 
-  1. **只修改本任务指定的文件**。不要修改任何其他文件。
-  2. 读取 {{ profile }} 获取项目编码规范和受保护路径。
-  3. 读取 {{ context_file }} 获取输入文件和参考文档的完整内容。
-  4. 不要向用户提问。如有不确定的地方，记录下来并停止。
-  5. 不要做全局重构、批量重命名、或格式化清理。
-  6. 保持现有代码风格和命名习惯。
+  1. 首先读取 {{ context_file }}，其中包含本任务的完整上下文（技术选型、约束、参考文档内容等）。
+  2. 只修改本任务指定的文件。不要修改任何其他文件。
+  3. 不要向用户提问。如有不确定的地方，记录下来并停止。
+  4. 不要做全局重构、批量重命名、或格式化清理。
+  5. 保持现有代码风格和命名习惯。
 
   ## 完成后
 
-  确认所有 output_files 已正确创建/修改后，输出：
-  ```
+  确认所有 output_files 已正确创建/修改后，**必须**在文件末尾追加以下段落，然后输出任务完成标记。
+
+  ### 产出要求
+
+  在每个修改/创建的源代码文件末尾，追加 `## Key Decisions` 段落（作为注释），记录：
+  - 关键设计决策及原因
+  - 与现有代码的集成约定
+  - 需要注意的约束条件
+
+  ### 任务完成标记
+
+  最后输出：
+
   === TASK COMPLETE ===
   Task: {{ task_name }}
   Files modified:
   - path/to/file1 (变更摘要)
   - path/to/file2 (变更摘要)
-  ```
+
 extensions:
   - type: builtin
     name: developer
