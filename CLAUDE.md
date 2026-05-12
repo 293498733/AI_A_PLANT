@@ -14,31 +14,70 @@
 
 ---
 
+## 当前开发计划
+
+> **最后更新**: 2026-05-12 | **当前版本**: v3.1.0
+> 
+> 上次会话产物：snapshot.py（增量扫描）、semantic_summarizer.py（语义摘要）、knowledge_accumulator.py（知识积累）、CI mode、Phase 0（项目初始化）。
+> 
+> 对比 `temp/gap-analysis.md` 的 10 个差距维度，已闭合 7 个，剩余 3 个为架构升级项（P2）。
+
+### 立即可做 — P0
+
+- [x] **测试基础设施**：pytest + 159 个测试（153 单元 + 6 集成），覆盖全部 15 个模块。运行：`pytest tests/ -v`
+- [ ] **端到端集成测试**：用真实 testproj 跑 `python pipeline.py --project testproj --ci` 验证全流程
+
+### 下一批 — P1
+
+- [ ] **多任务并行**：independent tasks 在 parallel_group 内并行执行（目前全串行）。改动点：`pipeline/task_graph.py` 调度循环
+- [ ] **子管线执行器**：大模块内部走 mini-pipeline（方案→编码→测试→审查），而非单次 goose 调用。改动点：新增 `pipeline/sub_pipeline.py`
+
+### 架构升级 — P2
+
+- [ ] **多代理审查**：Phase 6 使用独立 goose session + 对立视角 prompt，替代自写自审
+- [ ] **质量评分**：5 维加权评分（正确性/测试/质量/安全/性能），不达标自动返回 task_graph
+- [ ] **规划偏离检测**：执行中检测实际产出与 03-plan.md 的偏差，自动告警
+
+### 新会话启动指引
+
+1. Claude Code 自动加载本文件 → 直接看本节了解"上次做到哪、接下来做什么"
+2. 从 P0 开始，逐项完成
+3. 每完成一项，勾选对应 checkbox 并更新「最后更新」日期
+4. 不要在无计划的情况下开始大规模重构
+
+---
+
 ## 开发状态追踪
 
-### 已实现 (v3.0.0 — 任务驱动 + 上下文外化)
+### 已实现 (v3.1.0 — 增量扫描 + 语义摘要 + 知识积累 + 中断恢复加固)
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| `pipeline/__init__.py` | ✅ v3 | 包初始化，版本号 3.0.0 |
+| `pipeline/__init__.py` | ✅ v3.1 | 包初始化，版本号 3.1.0 |
 | `pipeline/logger.py` | ✅ 完成 | 结构化日志，终端+文件双输出，带颜色 |
-| `pipeline/state.py` | ✅ v3 | .pipeline_stage / .pipeline_note / task_state.json 读写 |
+| `pipeline/state.py` | ✅ v3.1 | .pipeline_stage / .pipeline_note / task_state.json 读写（原子写入） |
 | `pipeline/config.py` | ✅ v3 | StageConfig + TaskConfig + TaskGraphConfig dataclass |
 | `pipeline/executor.py` | ✅ v3 | Popen 实时输出 + run_task() 任务级执行 |
-| `pipeline/checkpoint.py` | ✅ v2 | 人工确认 + 产出文件前 25 行摘要预览 |
-| `pipeline/error_handler.py` | ✅ v3 | Action + TaskAction 双层级错误处理 |
-| `pipeline/task_state.py` | ✅ 新增 | TaskStateManager：依赖拓扑、状态追踪、崩溃恢复 |
-| `pipeline/task_context.py` | ✅ 新增 | ContextAssembler：任务上下文组装、文件智能读取 |
-| `pipeline/task_graph.py` | ✅ 新增 | 任务图执行器：拓扑排序 + fresh session per task |
-| `pipeline/git_ops.py` | ✅ 新增 | Git 自动提交、pre-task stash、commit hash |
-| `pipeline.py` | ✅ v3 | CLI、任务图路由、阶段计时、运行摘要 |
-| `pipeline.yaml` | ✅ v3 | 11 阶段：+Phase 3.5(拆分) + checkpoint_c2 + task_graph |
-| Recipe 文件 (9个) | ✅ v3 | 新增 03.5-decompose.yaml + task-template.yaml |
+| `pipeline/checkpoint.py` | ✅ v3.1 | 人工确认 + CI 自动跳过 + 产出文件前 25 行摘要预览 |
+| `pipeline/error_handler.py` | ✅ v3.1 | Action + TaskAction 双层级错误处理 + CI 自动决策 |
+| `pipeline/task_state.py` | ✅ v3.1 | TaskStateManager：依赖拓扑、状态追踪、崩溃恢复、模块级进度 |
+| `pipeline/task_context.py` | ✅ v3.1 | ContextAssembler：增量扫描 + 语义摘要 + 上下文组装 |
+| `pipeline/task_graph.py` | ✅ v3.1 | 任务图执行器：拓扑排序 + fresh session + 残留清理 + 知识注入 |
+| `pipeline/git_ops.py` | ✅ 完成 | Git 自动提交、pre-task stash、commit hash |
+| `pipeline/snapshot.py` | ✅ 新增 | SnapshotManager：文件树 hash 快照 + 增量变更检测 |
+| `pipeline/semantic_summarizer.py` | ✅ 新增 | SemanticSummarizer：代码/文档语义结构提取，零 AI 成本 |
+| `pipeline/knowledge_accumulator.py` | ✅ 新增 | KnowledgeAccumulator：自动提取关键决策，下游任务注入 |
+| `pipeline.py` | ✅ v3.1 | CLI、任务图路由、阶段计时、运行摘要、--ci 模式 |
+| `pipeline.yaml` | ✅ v3.1 | 12 阶段：+Phase 0(项目初始化) + Phase 3.5(拆分) + task_graph |
+| Recipe 文件 (10个) | ✅ v3.1 | 新增 00-init-project.yaml + 03.5-decompose.yaml + task-template.yaml |
 | Profile 模板 | ✅ 完成 | java-spring.yml |
 | `CLAUDE.md` | ✅ 完成 | 本文件 |
 | `ARCHITECTURE.md` | ✅ 完成 | 架构设计文档 |
 | `README.md` | ✅ 完成 | 用户手册 |
 | `requirements.txt` | ✅ 完成 | pyyaml>=6.0 |
+| `requirements-dev.txt` | ✅ 新增 | pytest + pytest-mock |
+| `tests/` (13 文件) | ✅ 新增 | 159 个测试覆盖 15 个模块 |
+| `.github/workflows/test.yml` | ✅ 新增 | GitHub Actions CI，Python 3.9-3.12 matrix |
 | `.gitignore` | ✅ 完成 | Git 忽略规则 |
 | Git 初始化 | ✅ 完成 | 仓库初始化 + GitHub push |
 
@@ -53,22 +92,31 @@
 | 检查点盲确认 | ✅ 已修复 | 展示产出文件前 25 行摘要 (2026-05-11) |
 | 无运行摘要 | ✅ 已修复 | 完成后打印阶段耗时 + 产出物清单 (2026-05-11) |
 | AI 额外产出文件 | ✅ 已检测 | 阶段后对比 snapshot，警告非预期文件 (2026-05-11) |
+| Phase 3 不产出 03-plan.md | ✅ 已修复 | Recipe 指令冲突：明确文件类型 + 强制写入段落 (2026-05-11) |
+| 崩溃残留文件 | ✅ 已修复 | 重跑前自动检测并清理上次半成品文件 (2026-05-12) |
+| 状态文件非原子写入 | ✅ 已修复 | task_state.json 改为临时文件+重命名 (2026-05-12) |
+| NOTE_EXIT 后无法继续 | ✅ 已修复 | 增加"保留笔记继续"选项 (2026-05-12) |
 
 ### 已知问题
 
 | 问题 | 状态 | 说明 |
 |------|------|------|
 | goose 僵尸进程 | 🔴 暂缓 | 用户同时运行多个 goose，暂不确定是否管线导致 |
+| 单 agent 串行执行 | 🟡 架构限制 | 无多代理协作、无交叉审查（自写自审） |
+| 质量评分缺失 | 🟡 待实现 | 仍为二进制 pass/fail（exit code），无 5 维评分 |
+| 规划-执行偏离检测 | 🟡 待实现 | 无 StrayMark 式偏离检测，方案变更后下游任务不知情 |
+| 未沙箱隔离 | 🟢 设计选择 | goose 直接在真实项目目录操作，无沙箱回滚 |
 
 ### 待实现（按优先级）
 
 | 优先级 | 任务 | 说明 |
 |--------|------|------|
 | **P0** | 集成测试 | 用 testproj 做端到端测试，验证任务图执行 |
-| **P1** | `--ci` 模式 | 跳过所有人工检查点，自动使用默认选择 |
 | **P1** | 多任务并行 | independent tasks 在 parallel_group 内并行执行 |
+| **P1** | 子管线执行器 | 大模块内部走 mini-pipeline（方案→编码→测试→审查） |
 | **P2** | 多代理审查 | Phase 6 使用独立 AI 视角进行审查（非自审） |
 | **P2** | 质量评分 | 5 维加权评分 (正确性/测试/质量/安全/性能) |
+| **P2** | 规划偏离检测 | 执行中检测实际产出与方案规划的偏差，自动告警 |
 | **P3** | Web Dashboard | 可选的 Web 界面查看管线状态 |
 
 ---
@@ -111,6 +159,22 @@
 - 高频 commit 保证代码可回溯到任意中间状态
 - 不盲目 push 避免远程历史碎片化（一堆"改了一半"的提交）
 - 阶段性完成的完整提交才值得同步到 GitHub
+
+### ADR-007: 增量扫描 + 语义摘要 + 知识积累 (v3.1.0, 2026-05-12)
+
+**决策**：上下文管理从"文件截断"升级为"语义外化"三件套——项目快照增量扫描、代码语义结构提取、跨任务知识自动积累。
+
+**原因**：
+- 用户反馈每次扫描全项目费时费 token——SnapshotManager 存文件树 hash，后续只读变更文件
+- ContextAssembler 原本对 10-50KB 文件只做前 300 行截断，丢失关键信息——SemanticSummarizer 按语言规则提取类/函数签名、关键注释，零 AI 成本
+- 人工 .pipeline_note 无法规模化——KnowledgeAccumulator 自动从每个任务产出中提取 Key Decisions 段落，下游任务注入相关历史决策
+
+**新增模块**：
+- `pipeline/snapshot.py` — 文件树 hash + mtime/size 变更检测 + 内容缓存
+- `pipeline/semantic_summarizer.py` — 支持 Python/Java/TS/Vue/YAML/Markdown/SQL/XML 8 种语言的结构提取
+- `pipeline/knowledge_accumulator.py` — 扫描产出文件的 Key Decisions 段落，按 category 查询注入
+
+**权衡**：摘要器是规则驱动而非 AI 驱动，复杂语义（如"这段代码做了什么业务判断"）无法提取。未来可升级为 AI 驱动的摘要（P2）。
 
 ---
 

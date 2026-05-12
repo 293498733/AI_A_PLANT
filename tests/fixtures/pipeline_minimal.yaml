@@ -1,0 +1,23 @@
+stages:
+  - id: phase1
+    name: "需求精炼"
+    recipe: recipes/steps/01-refine-requirement.yaml
+    max_turns: 80
+    params:
+      requirement_raw: "{AD}/requirement-raw.md"
+      requirement: "{AD}/requirement.md"
+    output_file: "{AD}/requirement.md"
+    state_value: refine_done
+
+  - id: checkpoint_a
+    name: "确认需求"
+    is_checkpoint: true
+    checkpoint_prompt: "请确认需求文档"
+    state_value: checkpoint_a_done
+
+  - id: task_graph
+    name: "任务图执行"
+    is_task_graph: true
+    params:
+      tasks_file: "{AD}/tasks.yaml"
+    state_value: tasks_done

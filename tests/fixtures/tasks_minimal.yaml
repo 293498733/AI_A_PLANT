@@ -1,0 +1,44 @@
+version: "1.0"
+project: "test-project"
+created_at: "2026-05-12"
+total_estimated_turns: 120
+tasks:
+  - id: t1
+    name: "Setup project"
+    description: "Create project scaffold"
+    category: "infra"
+    estimated_turns: 20
+    priority: "P0"
+    output_files:
+      - "README.md"
+    module: "core"
+
+  - id: t2
+    name: "Add backend API"
+    description: "Implement REST endpoints"
+    category: "backend"
+    estimated_turns: 60
+    priority: "P0"
+    depends_on:
+      - t1
+    input_files:
+      - "README.md"
+    output_files:
+      - "src/api.py"
+    context_notes: "Use FastAPI"
+    reference_docs:
+      - "03-plan.md"
+    module: "backend"
+    retry_limit: 3
+    timeout_minutes: 20
+
+  - id: t3
+    name: "Add frontend"
+    description: "Implement Vue pages"
+    category: "frontend"
+    estimated_turns: 40
+    priority: "P1"
+    depends_on:
+      - t2
+    parallel_group: "ui"
+    module: "ui"

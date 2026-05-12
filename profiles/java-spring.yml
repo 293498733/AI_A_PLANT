@@ -49,6 +49,32 @@ dataAccess:
       - MyBatis mapper
       - Spring JDBC
 
+# 框架特化信息（Phase 0 自动填充，初始为通用默认值）
+framework:
+  name: "Spring Boot"
+  routing: "annotation-based"
+  security:
+    type: "none"
+    annotation: ""
+  menuManagement: "none"
+  orm:
+    type: "MyBatis"
+    mapperLocation: "**/mapper/**/*.xml"
+
+# 数据库特化信息
+database:
+  dictTables: []
+  menuTable: ""
+  migrationPath: ""
+
+# 前端信息（如存在前端工程）
+frontend:
+  enabled: false
+  framework: ""
+  uiLibrary: ""
+  buildTool: ""
+  routing: ""
+
 layers:
   - controller
   - service

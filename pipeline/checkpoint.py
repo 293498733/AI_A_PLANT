@@ -8,6 +8,13 @@ logger = logging.getLogger("ai-dev-flow")
 SEPARATOR = "=" * 60
 PREVIEW_LINES = 25
 
+ci_mode = False
+
+
+def set_ci_mode(enabled: bool) -> None:
+    global ci_mode
+    ci_mode = enabled
+
 
 def confirm(title: str, prompt: str, preview_file: Path | None = None) -> None:
     """暂停并等待用户确认，可选展示产出文件摘要。"""
@@ -22,6 +29,9 @@ def confirm(title: str, prompt: str, preview_file: Path | None = None) -> None:
     if preview_file and preview_file.exists():
         preview(preview_file)
 
+    if ci_mode:
+        print("  [CI] 自动确认，继续执行...")
+        return
     print()
     input("按 Enter 继续...")
 
@@ -43,6 +53,9 @@ def preview(filepath: Path, lines: int = PREVIEW_LINES) -> None:
 
 
 def ask_boolean(prompt: str, default: bool = True) -> bool:
+    if ci_mode:
+        print(f"  [CI] {prompt} → {'Y' if default else 'N'} (auto)")
+        return default
     suffix = " (Y/n): " if default else " (y/N): "
     answer = input(prompt + suffix).strip().lower()
     if not answer:

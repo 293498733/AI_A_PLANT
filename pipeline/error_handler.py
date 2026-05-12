@@ -23,9 +23,19 @@ class TaskAction(Enum):
 
 SEPARATOR = "=" * 60
 
+ci_mode = False
+
+
+def set_ci_mode(enabled: bool) -> None:
+    global ci_mode
+    ci_mode = enabled
+
 
 def handle_error(ai_dev_dir: Path) -> Action:
     """显示错误菜单，返回用户选择的操作。"""
+    if ci_mode:
+        print("\n  [CI] 阶段执行失败，自动跳过...")
+        return Action.SKIP
     print()
     print(SEPARATOR)
     print("  阶段执行失败")
@@ -63,6 +73,13 @@ def handle_error(ai_dev_dir: Path) -> Action:
 def handle_task_error(task_id: str, task_name: str, retries: int,
                       retry_limit: int, ai_dev_dir: Path) -> TaskAction:
     """任务级错误处理菜单。返回用户选择的操作。"""
+    if ci_mode:
+        if retries < retry_limit:
+            print(f"\n  [CI] Task {task_id} 失败 ({retries}/{retry_limit})，自动重试...")
+            return TaskAction.RETRY_TASK
+        else:
+            print(f"\n  [CI] Task {task_id} 失败 (已达上限)，自动跳过...")
+            return TaskAction.SKIP_TASK
     print()
     print(SEPARATOR)
     print(f"  Task Failed: {task_name} ({task_id})")

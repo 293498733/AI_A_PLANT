@@ -3,6 +3,20 @@
 
 stages:
   # ============================================================
+  # Phase 0: 项目初始化（自动扫描生成 profile）
+  # ============================================================
+  - id: phase0
+    name: "项目初始化"
+    recipe: recipes/steps/00-init-project.yaml
+    max_turns: 60
+    params:
+      project_root: "{P}"
+      output_profile: "{AD}/profile.yml"
+      output_project_map: "{AD}/project-map.md"
+    output_file: "{AD}/profile.yml"
+    state_value: init_done
+
+  # ============================================================
   # Phase 1: 需求精炼
   # ============================================================
   - id: phase1
@@ -12,6 +26,7 @@ stages:
     params:
       project_root: "{P}"
       profile: "{AD}/profile.yml"
+      project_map: "{AD}/project-map.md"
       requirement_raw: "{AD}/requirement-raw.md"
       requirement: "{AD}/requirement.md"
     output_file: "{AD}/requirement.md"
@@ -37,6 +52,7 @@ stages:
       project_root: "{P}"
       requirement: "{AD}/requirement.md"
       profile: "{AD}/profile.yml"
+      project_map: "{AD}/project-map.md"
       output_analysis: "{OUT}/02-analysis.md"
     output_file: "{OUT}/02-analysis.md"
     state_value: analysis_done
