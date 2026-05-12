@@ -16,11 +16,11 @@
 
 ## 当前开发计划
 
-> **最后更新**: 2026-05-12 | **当前版本**: v3.1.0
+> **最后更新**: 2026-05-12 | **当前版本**: v3.1.0 | **提交**: 2be6885
 > 
-> 上次会话产物：snapshot.py（增量扫描）、semantic_summarizer.py（语义摘要）、knowledge_accumulator.py（知识积累）、CI mode、Phase 0（项目初始化）。
+> 本次会话产物：测试体系（159 个测试、GitHub Actions CI）、开发计划（PLAN 章节）、ARCHITECTURE.md v3.1.0 同步。
 > 
-> 对比 `temp/gap-analysis.md` 的 10 个差距维度，已闭合 7 个，剩余 3 个为架构升级项（P2）。
+> gap-analysis 10 个差距已闭合 7 个，剩余 3 个为架构升级项（P2）。P0 测试基础设施已完成，下一步：端到端集成测试。
 
 ### 立即可做 — P0
 
