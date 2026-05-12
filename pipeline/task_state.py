@@ -17,8 +17,12 @@ STATUS_SKIPPED = "skipped"
 class TaskStateManager:
     """管理 .ai-dev/task_state.json 中的任务执行状态。"""
 
-    def __init__(self, ai_dev_dir: Path, task_ids: list[str]):
+    def __init__(self, ai_dev_dir: Path, task_ids: list[str],
+                 dependencies: dict[str, list[str]] | None = None,
+                 modules: dict[str, str] | None = None):
         self.state_file = ai_dev_dir / "task_state.json"
+        self.dependencies = dependencies or {}
+        self.modules = modules or {}  # task_id -> module_name
         self.tasks: dict[str, dict] = {}
         existing = _read(ai_dev_dir) or {}
         for tid in task_ids:
@@ -75,8 +79,10 @@ class TaskStateManager:
         for tid, tr in self.tasks.items():
             if tr["status"] != STATUS_PENDING:
                 continue
-            # Check dependencies — external info from TaskConfig
-            ready.append(tid)  # Will be filtered by caller using TaskConfig.depends_on
+            deps = self.dependencies.get(tid, [])
+            if not all(dep in completed_ids for dep in deps):
+                continue
+            ready.append(tid)
         return ready
 
     def reset_in_progress(self) -> list[str]:
@@ -97,3 +103,17 @@ class TaskStateManager:
         failed = sum(1 for t in self.tasks.values()
                      if t["status"] == STATUS_FAILED)
         return done, len(self.tasks), failed
+
+    def get_module_progress(self) -> dict[str, tuple[int, int, int]]:
+        """返回每个模块的 (done, total, failed) 进度映射。"""
+        modules: dict[str, dict] = {}
+        for tid, ts in self.tasks.items():
+            mod = self.modules.get(tid, "_unassigned")
+            if mod not in modules:
+                modules[mod] = {"done": 0, "total": 0, "failed": 0}
+            modules[mod]["total"] += 1
+            if ts["status"] in (STATUS_COMPLETED, STATUS_SKIPPED):
+                modules[mod]["done"] += 1
+            elif ts["status"] == STATUS_FAILED:
+                modules[mod]["failed"] += 1
+        return {m: (s["done"], s["total"], s["failed"]) for m, s in modules.items()}

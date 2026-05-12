@@ -36,6 +36,7 @@ class TaskConfig:
     output_files: list[str] = field(default_factory=list)
     context_notes: str = ""
     reference_docs: list[str] = field(default_factory=list)
+    module: str = ""          # 所属模块/子系统
     parallel_group: str | None = None
     retry_limit: int = 2
     timeout_minutes: int = 15
@@ -115,6 +116,7 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
             output_files=item.get("output_files", []),
             context_notes=item.get("context_notes", ""),
             reference_docs=item.get("reference_docs", []),
+            module=item.get("module", ""),
             parallel_group=item.get("parallel_group"),
             retry_limit=item.get("retry_limit", 2),
             timeout_minutes=item.get("timeout_minutes", 15),

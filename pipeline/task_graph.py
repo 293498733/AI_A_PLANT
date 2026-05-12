@@ -10,6 +10,8 @@ from pipeline.task_state import (
     STATUS_FAILED, STATUS_SKIPPED,
 )
 from pipeline.task_context import ContextAssembler
+from pipeline.snapshot import SnapshotManager
+from pipeline.knowledge_accumulator import KnowledgeAccumulator
 from pipeline.git_ops import GitOps
 from pipeline.executor import run_task
 from pipeline.error_handler import handle_task_error, TaskAction
@@ -42,10 +44,23 @@ def execute_task_graph(
         return False, {}
 
     # 初始化状态管理器
-    state_mgr = TaskStateManager(ai_dev_dir, task_ids)
+    dependencies = {tid: t.depends_on for tid, t in tasks.items()}
+    modules = {tid: t.module for tid, t in tasks.items() if t.module}
+    state_mgr = TaskStateManager(ai_dev_dir, task_ids, dependencies, modules)
     state_mgr.reset_in_progress()  # 崩溃恢复
 
-    context_asm = ContextAssembler(project_root, ai_dev_dir)
+    # 自动跳过已耗尽重试的失败任务
+    for tid in task_ids:
+        tr = state_mgr.tasks[tid]
+        if tr["status"] == STATUS_FAILED and tr["retries"] >= tasks[tid].retry_limit:
+            logger.warning(f"Task {tid} retries exhausted ({tr['retries']}/{tasks[tid].retry_limit}), auto-skip")
+            state_mgr.tasks[tid]["status"] = STATUS_SKIPPED
+            state_mgr.tasks[tid]["notes"] = f"Auto-skipped: retries exhausted"
+    state_mgr.save()
+
+    snapshot_mgr = SnapshotManager(ai_dev_dir, project_root)
+    knowledge_mgr = KnowledgeAccumulator(ai_dev_dir)
+    context_asm = ContextAssembler(project_root, ai_dev_dir, snapshot_mgr)
     try:
         git = GitOps(project_root)
         git_available = True
@@ -69,14 +84,7 @@ def execute_task_graph(
                 completed_ids.add(tid)
 
         # 找就绪任务
-        ready = []
-        for tid in task_ids:
-            tr = state_mgr.tasks[tid]
-            if tr["status"] != STATUS_PENDING:
-                continue
-            task = tasks[tid]
-            if all(dep in completed_ids for dep in task.depends_on):
-                ready.append(tid)
+        ready = state_mgr.get_next_ready(completed_ids)
 
         # 检查是否全部完成
         if not ready:
@@ -126,21 +134,37 @@ def execute_task_graph(
             print(SEPARATOR)
             print(f"  [{len(completed_ids)+1}/{total}] {task.name} ({task.id})")
             print(f"  分类: {task.category} | 优先级: {task.priority} | 预估: {task.estimated_turns}turns")
+            if task.module:
+                mod_prog = state_mgr.get_module_progress()
+                if task.module in mod_prog:
+                    d, t, f = mod_prog[task.module]
+                    bar = _module_bar(d - (1 if f == 0 else 0), t)  # exclude current task
+                    print(f"  模块: {task.module} {bar}")
             print(SEPARATOR)
 
             # Git pre-check
             if git_available and git:
                 git.pre_task_check()
 
-            # 上下文组装
+            # 检测上次崩溃残留的半成品文件
+            residual = _detect_residual_files(project_root, task)
+            if residual:
+                logger.warning(f"Task {tid}: 检测到崩溃残留文件 {residual}，自动清理")
+                for f in residual:
+                    (project_root / f).unlink(missing_ok=True)
+
+            # 上下文组装（含历史决策注入）
             ctx = context_asm.assemble(task)
+            # 注入相关历史知识
+            relevant_knowledge = knowledge_mgr.query(task.category)
+            if relevant_knowledge:
+                ctx.context_notes += "\n\n### Relevant Past Decisions\n" + "\n---\n".join(relevant_knowledge)
             context_text = context_asm.render_prompt(task, ctx)
 
             # 构建参数
             params = {
                 "task_name": task.name,
                 "task_description": task.description,
-                "task_context_notes": task.context_notes,
                 "project_root": str(project_root),
                 "profile": str(profile_path),
                 "context_file": _write_context_file(ai_dev_dir, tid, context_text),
@@ -183,6 +207,11 @@ def execute_task_graph(
                             ) or ""
                         state_mgr.mark_completed(tid, commit_hash, task.output_files)
                         state_mgr.save()
+                        snapshot_mgr.update_snapshot()
+                        knowledge_mgr.extract_and_append(
+                            tid, task.name, task.category,
+                            task.output_files, project_root,
+                        )
                         print(f"  ✅ 完成 ({mins}m{secs}s)" +
                               (f" — {commit_hash}" if commit_hash else ""))
                     completed_ids.add(tid)
@@ -238,6 +267,26 @@ def _write_context_file(ai_dev_dir: Path, task_id: str, context_text: str) -> st
     ctx_file = ctx_dir / f"{task_id}.md"
     ctx_file.write_text(context_text, encoding="utf-8")
     return str(ctx_file)
+
+
+def _module_bar(done: int, total: int) -> str:
+    """渲染模块进度条。"""
+    if total <= 0:
+        return ""
+    width = 12
+    filled = int(width * done / total)
+    bar = "█" * filled + "░" * (width - filled)
+    return f"[{bar}] {done}/{total}"
+
+
+def _detect_residual_files(project_root: Path, task: TaskConfig) -> list[str]:
+    """检测上次崩溃残留的半成品输出文件。"""
+    residual = []
+    for f in task.output_files:
+        fp = project_root / f
+        if fp.exists():
+            residual.append(f)
+    return residual
 
 
 def _detect_cycle(tasks: dict[str, TaskConfig]) -> list[str] | None:

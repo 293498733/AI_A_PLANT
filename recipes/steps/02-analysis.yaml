@@ -7,7 +7,7 @@ instructions: |
   基于已确认的结构化需求文档，分析输出需求分析报告。
   核心产出：功能拆分、数据流、界面逻辑、以及所有**不确定项**。
 
-  不要写代码。不要修改代码文件。
+  仅输出分析报告到 {{ output_analysis }}，禁止编写任何源代码文件（.java/.py/.ts/.js/.go 等）。
 
 parameters:
   - key: project_root
@@ -22,6 +22,10 @@ parameters:
     input_type: string
     requirement: required
     description: "项目画像文件路径"
+  - key: project_map
+    input_type: string
+    requirement: required
+    description: "项目架构地图路径"
   - key: output_analysis
     input_type: string
     requirement: required
@@ -31,14 +35,19 @@ prompt: |
   基于以下文件进行需求分析：
 
   1. 精炼需求：{{ requirement }}
-  2. 项目画像：{{ profile }}
-  3. 项目代码仓库：{{ project_root }}
+  2. 项目画像：{{ profile }}（包含框架类型、路由模式、权限体系）
+  3. 项目架构地图：{{ project_map }}（包含模块结构、目录约定、数据库表清单）
+  4. 项目代码仓库：{{ project_root }}
 
   ## 执行规则
 
-  1. 不要写代码。
-  2. 不要修改代码文件。
+  1. 仅输出分析报告，禁止编写任何源代码（.java/.py/.ts/.js/.go 等）。
+  2. 禁止修改项目中的源代码文件、配置文件、SQL 迁移脚本。
   3. 分析必须基于项目代码仓库中的现有代码。如果找不到对应模块，记录为问题。
+  4. 根据 {{ profile }} 中的 framework 信息，特别关注：
+     - 如果 routing=db-driven，新增页面必须确认菜单SQL的存放路径和格式
+     - 如果 menuManagement=db-driven，分析 sys_menu 表结构和现有菜单SQL的模式
+     - 确认权限注解类型，分析现有权限标识的命名规范
 
   ## 分析内容
 
