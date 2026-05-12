@@ -1,0 +1,168 @@
+version: "1.0.0"
+title: "阶段 0 - 项目初始化"
+description: "扫描目标项目，自动生成项目画像和架构地图"
+instructions: |
+  你是一个项目分析专家。你的任务是扫描目标项目的完整代码库，
+  提取所有关键架构信息，生成精准的项目画像文件。
+
+  核心规则：
+  1. 只读取文件，不修改任何代码。
+  2. 用文件系统操作（glob/grep）尽可能多地发现信息。
+  3. 所有发现写入输出文件，不要只记在脑中。
+
+parameters:
+  - key: project_root
+    input_type: string
+    requirement: required
+    description: "项目根目录"
+  - key: output_profile
+    input_type: string
+    requirement: required
+    description: "增强版项目画像输出路径"
+  - key: output_project_map
+    input_type: string
+    requirement: required
+    description: "项目架构地图输出路径"
+
+prompt: |
+  你是一个项目分析专家。你需要扫描目标项目 {{ project_root }}，
+  生成两份关键文档。
+
+  ## 第一步：扫描后端
+
+  1. 找到 pom.xml（可能在根目录或子目录）：
+     - 提取 Spring Boot 版本、Java 版本
+     - 识别 ORM 框架（MyBatis/MyBatis-Plus/JPA）
+     - 识别权限框架（Sa-Token/Spring Security/Shiro）
+     - 识别工具库（Hutool/Lombok/MapStruct）
+     - 列出所有 Maven 子模块
+
+  2. 找到 Controller 文件（搜索 @RestController 或 @Controller）：
+     - 提取 URL 映射模式（@RequestMapping 路径）
+     - 提取权限注解（@SaCheckPermission / @PreAuthorize 等）
+     - 记录命名规范（CamelCase vs kebab-case vs lowerCamel）
+
+  3. 找到 SQL 脚本目录（搜索 *.sql 文件）：
+     - 检查 sys_menu 或 menu 相关表结构
+     - 检查 sys_dict_type/sys_dict_data 表
+     - 了解迁移脚本命名规范
+
+  4. 找到 application.yml / application.properties：
+     - 确认数据库配置
+     - 确认 Redis 配置
+
+  ## 第二步：扫描前端
+
+  1. 找到 package.json：
+     - 提取 Vue 版本、Element Plus 版本
+     - 提取构建工具（Vite/Webpack）
+     - 提取状态管理（Pinia/Vuex）
+
+  2. 找到现有页面（views/ 目录）：
+     - 确认目录结构模式
+     - 确认组件拆分模式（index.vue + useXxx.js + components/）
+
+  3. 找到 API 层（api/ 目录）：
+     - 确认 API 封装模式
+     - 确认 request 封装路径
+
+  4. 找到路由配置（router/ 目录或搜索路由相关代码）：
+     - 确认是静态路由还是动态路由（从服务端菜单树加载）
+     - 如果是动态路由，记录获取菜单的 API 路径
+
+  ## 第三步：生成输出
+
+  ### A. 写入增强版 profile.yml 到 {{ output_profile }}
+
+  基于扫描结果，写入完整的 profile.yml，至少包含：
+  ```yaml
+  profile: java-spring
+  description: 自动生成的进销存 WMS 项目画像
+
+  projectRules:
+    allowGlobalRefactor: false
+    allowDeleteExistingLogic: false
+    allowDbChangeByDefault: false
+    requirePlanBeforeCode: true
+    requireReviewAfterCode: true
+
+  backend:
+    language: Java
+    jdk:
+      compileRelease: <检测到的Java版本>
+    buildTool: Maven
+    packaging: multi-module
+    commonFrameworks:
+      - <检测到的框架列表>
+    modules:
+      <模块名>: <模块路径>
+
+  frontend:
+    framework: Vue
+    version: <检测到的Vue版本>
+    uiLibrary: Element Plus
+    buildTool: Vite
+    routing: db-driven  # 或 static，根据实际检测结果
+
+  framework:
+    name: RuoYi-Vue-Plus  # 根据实际检测
+    version: <检测到的版本>
+    routing: db-driven
+    security:
+      type: Sa-Token
+      annotation: "@SaCheckPermission"
+    menuManagement: db-driven
+    orm:
+      type: MyBatis-Plus
+      mapperLocation: "**/mapper/**/*.xml"
+
+  database:
+    dictTables:
+      - sys_dict_type
+      - sys_dict_data
+    menuTable: sys_menu
+    migrationPath: <检测到的SQL脚本目录>
+
+  codingRules:
+    controller:
+      urlPattern: <检测到的URL模式>
+      permissionAnnotation: <检测到的权限注解>
+    frontend:
+      pageStructure: <检测到的页面结构模式>
+      apiPattern: <检测到的API封装模式>
+
+  commands:
+    compileOnly:
+      - mvn -DskipTests compile
+    build:
+      - mvn clean package
+    test:
+      - mvn test
+
+  protectedPaths:
+    - "**/src/main/resources/application-prod.yml"
+    - "**/src/main/resources/application.yml"
+  ```
+
+  ### B. 写入项目架构地图到 {{ output_project_map }}
+
+  包含以下章节：
+  1. 模块结构图
+  2. 关键目录说明
+  3. 数据库表清单（从SQL脚本提取）
+  4. 菜单和权限体系说明（如适用）
+  5. 页面和路由对应关系
+  6. 开商约定（命名规范、代码模式）
+
+  完成后输出：
+  ```
+  === 项目初始化完成 ===
+  画像已写入：{{ output_profile }}
+  地图已写入：{{ output_project_map }}
+  ```
+
+extensions:
+  - type: builtin
+    name: developer
+    timeout: 600
+    bundled: true

@@ -1,0 +1,7 @@
+profile: java-spring
+description: Test profile
+projectRules:
+  allowGlobalRefactor: false
+backend:
+  language: Java
+  buildTool: Maven
