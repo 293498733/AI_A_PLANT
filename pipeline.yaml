@@ -143,7 +143,6 @@ stages:
     params:
       project_root: "{P}"
       profile: "{AD}/profile.yml"
-      tasks_file: "{AD}/tasks.yaml"
       output_result: "{OUT}/05-build.md"
     output_file: "{OUT}/05-build.md"
     state_value: build_done
@@ -160,7 +159,7 @@ stages:
       requirement: "{AD}/requirement.md"
       input_analysis: "{OUT}/02-analysis.md"
       input_engineering_plan: "{OUT}/03-plan.md"
-      tasks_file: "{AD}/tasks.yaml"
+      input_change_list: "{AD}/tasks.yaml"
       input_build_result: "{OUT}/05-build.md"
       profile: "{AD}/profile.yml"
       output_review: "{OUT}/06-review.md"
@@ -185,7 +184,7 @@ stages:
     max_turns: 40
     params:
       requirement: "{AD}/requirement.md"
-      tasks_file: "{AD}/tasks.yaml"
+      input_change_list: "{AD}/tasks.yaml"
       input_build_result: "{OUT}/05-build.md"
       input_review: "{OUT}/06-review.md"
       output_delivery: "{OUT}/07-delivery.md"

@@ -4,6 +4,7 @@
 用法:
     python pipeline.py                          # 交互式启动
     python pipeline.py --project D:/MyPrj/xxx  # 指定项目路径
+    python pipeline.py --project ./foo --git-url https://github.com/user/repo.git  # 自动 clone
     python pipeline.py --resume                # 从断点恢复
     python pipeline.py --from-stage phase3     # 从指定阶段开始
     python pipeline.py --dry-run               # 预览将执行的阶段
@@ -14,6 +15,7 @@ import os
 import time
 import shutil
 import argparse
+import subprocess
 from pathlib import Path
 
 # 确保项目根目录在 sys.path 中
@@ -36,10 +38,27 @@ from pipeline.git_ops import GitOps
 SEPARATOR = "=" * 60
 
 
-def setup_project(project_path: str) -> tuple[Path, Path, Path]:
+def setup_project(project_path: str, git_url: str = "", git_branch: str = "") -> tuple[Path, Path, Path]:
     p = Path(project_path).resolve()
     if not p.exists():
-        raise FileNotFoundError(f"项目目录不存在: {p}")
+        if git_url:
+            print(f"项目目录不存在，从远程仓库 clone...")
+            print(f"  {git_url} → {p}")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            clone_cmd = ["git", "clone"]
+            if git_branch:
+                clone_cmd += ["-b", git_branch]
+            clone_cmd += [git_url, str(p)]
+            result = subprocess.run(
+                clone_cmd,
+                capture_output=True, text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"git clone 失败: {result.stderr.strip()}")
+            print(f"  clone 完成")
+        else:
+            raise FileNotFoundError(f"项目目录不存在: {p}")
 
     ad = p / ".ai-dev"
     out = ad / "outputs"
@@ -115,6 +134,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--project", "-p", help="目标项目路径")
+    parser.add_argument("--git-url", help="远程仓库地址（项目目录不存在时自动 clone）")
+    parser.add_argument("--git-branch", help="clone 时指定分支（配合 --git-url 使用）")
     parser.add_argument("--req", "-r", help="需求文件路径")
     parser.add_argument("--resume", action="store_true", help="从断点恢复")
     parser.add_argument("--new", dest="new_run", action="store_true", help="全新运行，清除旧的 .ai-dev 产出")
@@ -141,7 +162,9 @@ def main():
             print("错误: 未指定项目路径")
             sys.exit(1)
 
-    P, AD, OUT = setup_project(project_path)
+    P, AD, OUT = setup_project(project_path,
+                                git_url=args.git_url or "",
+                                git_branch=args.git_branch or "")
     logger = init_logger(P, debug=args.debug)
     logger.info(f"项目: {P}")
 
