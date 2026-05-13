@@ -1,8 +1,14 @@
-"""任务图执行器 — 依赖拓扑排序 + 逐任务 fresh session 执行（沙箱隔离）。"""
+"""任务图执行器 — 依赖拓扑排序 + 逐任务 fresh session 执行（沙箱隔离）。
+
+v3.3: 并发上限控制 — ThreadPoolExecutor + parallel_group 分组 + max_workers 背压。
+"""
 
 import time
 import logging
+import threading
 from pathlib import Path
+from itertools import groupby
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pipeline.config import TaskGraphConfig, TaskConfig, load_task_graph
 from pipeline.task_state import (
@@ -20,6 +26,13 @@ from pipeline.sandbox import SandboxManager, SandboxCreateError
 logger = logging.getLogger("ai-dev-flow")
 
 SEPARATOR = "=" * 60
+
+# _execute_single_task 返回值
+_TASK_OK = "ok"
+_TASK_RETRY = "retry"
+_TASK_SKIP = "skip"
+_TASK_ABORT = "abort"
+_TASK_NOTE_EXIT = "note_exit"
 
 
 def execute_task_graph(
@@ -77,222 +90,321 @@ def execute_task_graph(
     print(SEPARATOR)
     print(f"  任务图执行 — {len(graph.tasks)} 个任务")
     print(f"  预估总 turns: {graph.total_estimated_turns}")
+    max_workers = graph.max_workers
+    if max_workers > 1:
+        print(f"  并发上限: {max_workers} workers")
     print(SEPARATOR)
 
+    lock = threading.Lock()
     total = len(graph.tasks)
-    while True:
-        # 计算已完成集合
-        completed_ids: set[str] = set()
-        for tid, tr in state_mgr.tasks.items():
-            if tr["status"] in (STATUS_COMPLETED, STATUS_SKIPPED):
-                completed_ids.add(tid)
+    task_recipe_path = str(Path(__file__).resolve().parent.parent / task_recipe)
 
-        # 找就绪任务
-        ready = state_mgr.get_next_ready(completed_ids)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        while True:
+            # 计算已完成集合
+            completed_ids: set[str] = set()
+            for tid, tr in state_mgr.tasks.items():
+                if tr["status"] in (STATUS_COMPLETED, STATUS_SKIPPED):
+                    completed_ids.add(tid)
 
-        # 检查是否全部完成
-        if not ready:
-            done, _, failed = state_mgr.progress()
-            if done >= total:
+            # 找就绪任务
+            ready = state_mgr.get_next_ready(completed_ids)
+
+            # 检查是否全部完成
+            if not ready:
+                done, _, failed = state_mgr.progress()
+                if done >= total:
+                    print()
+                    print(SEPARATOR)
+                    print(f"  任务图完成 — {done}/{total} 任务")
+                    print(SEPARATOR)
+                    return True, state_mgr.tasks
+                elif failed > 0 and all(
+                    state_mgr.tasks[tid]["status"] == STATUS_FAILED
+                    for tid in task_ids
+                    if state_mgr.tasks[tid]["status"] not in (STATUS_COMPLETED, STATUS_SKIPPED)
+                ):
+                    logger.error("Task graph blocked by failures")
+                    return False, state_mgr.tasks
+                else:
+                    # Deadlock check
+                    pending = [tid for tid in task_ids
+                               if state_mgr.tasks[tid]["status"] == STATUS_PENDING
+                               and tid not in ready]
+                    blocked = []
+                    for tid in pending:
+                        task = tasks[tid]
+                        unmet = [dep for dep in task.depends_on if dep not in completed_ids]
+                        if any(state_mgr.tasks[dep]["status"] == STATUS_FAILED for dep in unmet):
+                            blocked.append(tid)
+                    if blocked:
+                        logger.error(f"Tasks blocked by failed dependencies: {blocked}")
+                    return False, state_mgr.tasks
+
+            # 排序：P0 优先，estimated_turns 小的优先
+            def _sort_key(tid):
+                t = tasks[tid]
+                p = 0 if t.priority == "P0" else (1 if t.priority == "P1" else 2)
+                return (p, t.estimated_turns)
+            ready.sort(key=_sort_key)
+
+            # 按 parallel_group 分组（None = 各自独立组）
+            groups = [list(g) for _, g in groupby(ready, key=lambda tid: tasks[tid].parallel_group)]
+
+            # 取第一个组执行，完成后重新计算 ready（新任务可能被解锁）
+            group = groups[0]
+
+            # 打印组内所有任务头
+            for i, tid in enumerate(group):
+                task = tasks[tid]
+                tr = state_mgr.tasks[tid]
+                seq = len(completed_ids) + i + 1
                 print()
                 print(SEPARATOR)
-                print(f"  任务图完成 — {done}/{total} 任务")
+                print(f"  [{seq}/{total}] {task.name} ({task.id})")
+                print(f"  分类: {task.category} | 优先级: {task.priority} | 预估: {task.estimated_turns}turns")
+                if task.module:
+                    mod_prog = state_mgr.get_module_progress()
+                    if task.module in mod_prog:
+                        d, t, f = mod_prog[task.module]
+                        bar = _module_bar(d - (1 if f == 0 else 0), t)
+                        print(f"  模块: {task.module} {bar}")
                 print(SEPARATOR)
-                return True, state_mgr.tasks
-            elif failed > 0 and all(
-                state_mgr.tasks[tid]["status"] == STATUS_FAILED
-                for tid in ready if tid in state_mgr.tasks
-            ):
-                # 有失败任务且没有就绪任务
-                logger.error("Task graph blocked by failures")
-                return False, state_mgr.tasks
-            else:
-                # Deadlock check
-                pending = [tid for tid in task_ids
-                           if state_mgr.tasks[tid]["status"] == STATUS_PENDING
-                           and tid not in ready]
-                # Check if pending tasks are truly blocked
-                blocked = []
-                for tid in pending:
-                    task = tasks[tid]
-                    unmet = [dep for dep in task.depends_on if dep not in completed_ids]
-                    if any(state_mgr.tasks[dep]["status"] == STATUS_FAILED for dep in unmet):
-                        blocked.append(tid)
-                if blocked:
-                    logger.error(f"Tasks blocked by failed dependencies: {blocked}")
-                return False, state_mgr.tasks
 
-        # 排序：P0 优先，estimated_turns 小的优先
-        def _sort_key(tid):
-            t = tasks[tid]
-            p = 0 if t.priority == "P0" else (1 if t.priority == "P1" else 2)
-            return (p, t.estimated_turns)
-        ready.sort(key=_sort_key)
+            # 提交组内所有任务到线程池
+            futures = {}
+            for tid in group:
+                future = executor.submit(
+                    _execute_single_task,
+                    tid=tid,
+                    task=tasks[tid],
+                    state_mgr=state_mgr,
+                    context_asm=context_asm,
+                    knowledge_mgr=knowledge_mgr,
+                    snapshot_mgr=snapshot_mgr,
+                    git=git,
+                    git_available=git_available,
+                    project_root=project_root,
+                    ai_dev_dir=ai_dev_dir,
+                    profile_path=profile_path,
+                    task_recipe=task_recipe_path,
+                    lock=lock,
+                )
+                futures[future] = tid
 
-        # 执行就绪任务（单线程顺序执行）
-        for tid in ready:
-            task = tasks[tid]
-            tr = state_mgr.tasks[tid]
-
-            print()
-            print(SEPARATOR)
-            print(f"  [{len(completed_ids)+1}/{total}] {task.name} ({task.id})")
-            print(f"  分类: {task.category} | 优先级: {task.priority} | 预估: {task.estimated_turns}turns")
-            if task.module:
-                mod_prog = state_mgr.get_module_progress()
-                if task.module in mod_prog:
-                    d, t, f = mod_prog[task.module]
-                    bar = _module_bar(d - (1 if f == 0 else 0), t)  # exclude current task
-                    print(f"  模块: {task.module} {bar}")
-            print(SEPARATOR)
-
-            # Git pre-check (on real project)
-            if git_available and git:
-                git.pre_task_check()
-
-            # 上下文组装（含历史决策注入）
-            ctx = context_asm.assemble(task)
-            relevant_knowledge = knowledge_mgr.query(task.category)
-            if relevant_knowledge:
-                ctx.context_notes += "\n\n### Relevant Past Decisions\n" + "\n---\n".join(relevant_knowledge)
-            context_text = context_asm.render_prompt(task, ctx)
-
-            state_mgr.mark_in_progress(tid)
-            state_mgr.save()
-
-            task_start = time.time()
-
-            # 创建沙箱（可选择跳过）
-            sandbox = None
-            sandbox_path = project_root
-            if task.sandbox_enabled:
-                sandbox = SandboxManager(project_root, ai_dev_dir)
+            # 等待组内所有任务完成
+            retry_needed = False
+            abort = False
+            for future in as_completed(futures):
+                tid = futures[future]
                 try:
-                    sandbox_path = sandbox.create(task.id)
-                except SandboxCreateError as e:
-                    logger.error(f"Sandbox create failed for {tid}: {e}")
-                    logger.warning(f"Falling back to non-sandboxed execution for {tid}")
-                    sandbox_path = project_root
-                    sandbox = None  # 标记未使用沙箱
-
-            # 构建参数（project_root 指向沙箱）
-            params = {
-                "task_name": task.name,
-                "task_description": task.description,
-                "project_root": str(sandbox_path),
-                "profile": str(profile_path),
-                "context_file": _write_context_file(ai_dev_dir, tid, context_text),
-            }
-
-            def _on_task_timeout():
-                logger.error(f"Task {tid}: watchdog timeout, sandbox preserved at {sandbox_path}")
-
-            try:
-                result = run_task(
-                    recipe=str(Path(__file__).resolve().parent.parent / task_recipe),
-                    max_turns=task.estimated_turns,
-                    params=params,
-                    cwd=sandbox_path,
-                    timeout_minutes=task.timeout_minutes,
-                    on_timeout=_on_task_timeout,
-                )
-
-                elapsed = int(time.time() - task_start)
-                mins, secs = divmod(elapsed, 60)
-
-                if result.returncode == 0:
-                    # 验证沙箱中的产出文件
-                    missing = [f for f in task.output_files
-                               if not (sandbox_path / f).exists()]
-                    if missing:
-                        logger.warning(f"Task {tid} completed but missing in sandbox: {missing}")
-                        if sandbox:
-                            logger.warning(f"Sandbox preserved at: {sandbox_path}")
-                        state_mgr.mark_completed(tid, "", task.output_files)
+                    result = future.result()
+                except Exception as e:
+                    logger.error(f"Task {tid} thread exception: {e}")
+                    with lock:
+                        state_mgr.mark_failed(tid, str(e))
                         state_mgr.save()
-                        print(f"  ⚠️ 完成 ({mins}m{secs}s) — 但缺少文件: {missing}")
-                    else:
-                        # 检测非预期修改
-                        if sandbox:
-                            extra = sandbox.detect_extra_modifications(
-                                set(task.output_files)
-                            )
-                            if extra:
-                                logger.warning(f"Task {tid} modified undeclared files: {extra}")
+                    result = _TASK_RETRY
 
-                        # 从沙箱同步产出文件到真实项目
-                        if sandbox:
-                            synced = sandbox.sync_outputs(task.output_files)
-                            logger.info(f"Synced {len(synced)} files from sandbox")
-                            sandbox.destroy()
+                if result == _TASK_RETRY:
+                    retry_needed = True
+                elif result in (_TASK_ABORT, _TASK_NOTE_EXIT):
+                    abort = True
 
-                        # 在真实项目上 git commit
-                        commit_hash = ""
-                        if git_available and git:
-                            commit_hash = git.commit_task(
-                                tid, task.name, task.category,
-                                task.priority, task.estimated_turns
-                            ) or ""
-                            if commit_hash:
-                                git.push()
-                        state_mgr.mark_completed(tid, commit_hash, task.output_files)
-                        state_mgr.save()
-                        snapshot_mgr.update_snapshot()
-                        knowledge_mgr.extract_and_append(
-                            tid, task.name, task.category,
-                            task.output_files, project_root,
-                        )
-                        print(f"  ✅ 完成 ({mins}m{secs}s)" +
-                              (f" — {commit_hash}" if commit_hash else ""))
-                    completed_ids.add(tid)
-                else:
-                    # 失败 — 保留沙箱供排查
-                    if sandbox:
-                        logger.warning(f"Task {tid} failed, sandbox preserved at: {sandbox_path}")
-                    state_mgr.mark_failed(tid,
-                        f"goose exit {result.returncode}: {result.stderr[:200]}")
-                    state_mgr.save()
-                    print(f"  ❌ 失败 ({mins}m{secs}s)")
-
-                    action = handle_task_error(
-                        tid, task.name, tr["retries"],
-                        task.retry_limit, ai_dev_dir
-                    )
-
-                    if action == TaskAction.RETRY_TASK:
-                        state_mgr.tasks[tid]["status"] = STATUS_PENDING
-                        state_mgr.tasks[tid]["started_at"] = None
-                        state_mgr.save()
-                        break  # 重新计算 ready 列表
-                    elif action == TaskAction.SKIP_TASK:
-                        state_mgr.mark_skipped(tid, "Human skipped")
-                        state_mgr.save()
-                        completed_ids.add(tid)
-                    elif action == TaskAction.ABORT_GRAPH:
-                        return False, state_mgr.tasks
-                    elif action == TaskAction.NOTE_EXIT:
-                        return False, state_mgr.tasks
-
-            except Exception as e:
-                logger.error(f"Task {tid} exception: {e}")
-                if sandbox:
-                    logger.warning(f"Task {tid} exception, sandbox preserved at: {sandbox_path}")
-                state_mgr.mark_failed(tid, str(e))
-                state_mgr.save()
-                action = handle_task_error(
-                    tid, task.name, tr["retries"],
-                    task.retry_limit, ai_dev_dir
-                )
-                if action == TaskAction.RETRY_TASK:
-                    state_mgr.tasks[tid]["status"] = STATUS_PENDING
-                    state_mgr.save()
-                    break
-                elif action == TaskAction.ABORT_GRAPH:
-                    return False, state_mgr.tasks
-                elif action == TaskAction.NOTE_EXIT:
-                    return False, state_mgr.tasks
+            if abort:
+                return False, state_mgr.tasks
+            # retry_needed → 重新计算 ready 列表（RETRY 任务已重置为 PENDING）
+            if retry_needed:
+                continue
 
     return True, state_mgr.tasks
+
+
+def _execute_single_task(
+    *,
+    tid: str,
+    task: TaskConfig,
+    state_mgr: TaskStateManager,
+    context_asm: ContextAssembler,
+    knowledge_mgr: KnowledgeAccumulator,
+    snapshot_mgr: SnapshotManager,
+    git,
+    git_available: bool,
+    project_root: Path,
+    ai_dev_dir: Path,
+    profile_path: Path,
+    task_recipe: str,
+    lock: threading.Lock,
+) -> str:
+    """执行单个原子任务（在 worker 线程中运行）。
+
+    锁范围：pre-execution（状态写入 + 沙箱创建）和 post-execution（状态更新 + git + snapshot）
+    不锁定：goose 子进程执行（主要耗时部分）。
+
+    Returns:
+        _TASK_OK / _TASK_RETRY / _TASK_SKIP / _TASK_ABORT / _TASK_NOTE_EXIT
+    """
+
+    # === Pre-execution (under lock) ===
+    with lock:
+        # Git pre-check (on real project)
+        if git_available and git:
+            git.pre_task_check()
+
+        # 上下文组装（含历史决策注入）
+        ctx = context_asm.assemble(task)
+        relevant_knowledge = knowledge_mgr.query(task.category)
+        if relevant_knowledge:
+            ctx.context_notes += "\n\n### Relevant Past Decisions\n" + "\n---\n".join(relevant_knowledge)
+        context_text = context_asm.render_prompt(task, ctx)
+
+        state_mgr.mark_in_progress(tid)
+        state_mgr.save()
+
+        # 创建沙箱（可选择跳过）
+        sandbox = None
+        sandbox_path = project_root
+        if task.sandbox_enabled:
+            sandbox = SandboxManager(project_root, ai_dev_dir)
+            try:
+                sandbox_path = sandbox.create(task.id)
+            except SandboxCreateError as e:
+                logger.error(f"Sandbox create failed for {tid}: {e}")
+                logger.warning(f"Falling back to non-sandboxed execution for {tid}")
+                sandbox_path = project_root
+                sandbox = None
+
+    # === Execution (no lock — goose subprocess runs independently) ===
+    task_start = time.time()
+
+    params = {
+        "task_name": task.name,
+        "task_description": task.description,
+        "project_root": str(sandbox_path),
+        "profile": str(profile_path),
+        "context_file": _write_context_file(ai_dev_dir, tid, context_text),
+    }
+
+    def _on_task_timeout():
+        logger.error(f"Task {tid}: watchdog timeout, sandbox preserved at {sandbox_path}")
+
+    try:
+        result = run_task(
+            recipe=task_recipe,
+            max_turns=task.estimated_turns,
+            params=params,
+            cwd=sandbox_path,
+            timeout_minutes=task.timeout_minutes,
+            on_timeout=_on_task_timeout,
+        )
+    except Exception as e:
+        logger.error(f"Task {tid}: run_task exception: {e}")
+        result = None
+        run_exception = e
+    else:
+        run_exception = None
+
+    elapsed = int(time.time() - task_start)
+    mins, secs = divmod(elapsed, 60)
+
+    # === Post-execution (under lock) ===
+    with lock:
+        if run_exception is not None:
+            logger.error(f"Task {tid} exception: {run_exception}")
+            if sandbox:
+                logger.warning(f"Task {tid} exception, sandbox preserved at: {sandbox_path}")
+            state_mgr.mark_failed(tid, str(run_exception))
+            state_mgr.save()
+            tr = state_mgr.tasks[tid]
+            action = handle_task_error(
+                tid, task.name, tr["retries"],
+                task.retry_limit, ai_dev_dir
+            )
+            if action == TaskAction.RETRY_TASK:
+                state_mgr.tasks[tid]["status"] = STATUS_PENDING
+                state_mgr.save()
+                return _TASK_RETRY
+            elif action == TaskAction.ABORT_GRAPH:
+                return _TASK_ABORT
+            elif action == TaskAction.NOTE_EXIT:
+                return _TASK_NOTE_EXIT
+            return _TASK_SKIP
+
+        if result.returncode == 0:
+            # 验证沙箱中的产出文件
+            missing = [f for f in task.output_files
+                       if not (sandbox_path / f).exists()]
+            if missing:
+                logger.warning(f"Task {tid} completed but missing in sandbox: {missing}")
+                if sandbox:
+                    logger.warning(f"Sandbox preserved at: {sandbox_path}")
+                state_mgr.mark_completed(tid, "", task.output_files)
+                state_mgr.save()
+                print(f"  ⚠️ 完成 ({mins}m{secs}s) — 但缺少文件: {missing}")
+                return _TASK_OK
+            else:
+                # 检测非预期修改
+                if sandbox:
+                    extra = sandbox.detect_extra_modifications(
+                        set(task.output_files)
+                    )
+                    if extra:
+                        logger.warning(f"Task {tid} modified undeclared files: {extra}")
+
+                # 从沙箱同步产出文件到真实项目
+                if sandbox:
+                    synced = sandbox.sync_outputs(task.output_files)
+                    logger.info(f"Synced {len(synced)} files from sandbox")
+                    sandbox.destroy()
+
+                # 在真实项目上 git commit
+                commit_hash = ""
+                if git_available and git:
+                    commit_hash = git.commit_task(
+                        tid, task.name, task.category,
+                        task.priority, task.estimated_turns
+                    ) or ""
+                    if commit_hash:
+                        git.push()
+                state_mgr.mark_completed(tid, commit_hash, task.output_files)
+                state_mgr.save()
+                snapshot_mgr.update_snapshot()
+                knowledge_mgr.extract_and_append(
+                    tid, task.name, task.category,
+                    task.output_files, project_root,
+                )
+                print(f"  ✅ 完成 ({mins}m{secs}s)" +
+                      (f" — {commit_hash}" if commit_hash else ""))
+                return _TASK_OK
+        else:
+            # 失败 — 保留沙箱供排查
+            if sandbox:
+                logger.warning(f"Task {tid} failed, sandbox preserved at: {sandbox_path}")
+            state_mgr.mark_failed(tid,
+                f"goose exit {result.returncode}: {result.stderr[:200]}")
+            state_mgr.save()
+            print(f"  ❌ 失败 ({mins}m{secs}s)")
+
+            tr = state_mgr.tasks[tid]
+            action = handle_task_error(
+                tid, task.name, tr["retries"],
+                task.retry_limit, ai_dev_dir
+            )
+
+            if action == TaskAction.RETRY_TASK:
+                state_mgr.tasks[tid]["status"] = STATUS_PENDING
+                state_mgr.tasks[tid]["started_at"] = None
+                state_mgr.save()
+                return _TASK_RETRY
+            elif action == TaskAction.SKIP_TASK:
+                state_mgr.mark_skipped(tid, "Human skipped")
+                state_mgr.save()
+                return _TASK_SKIP
+            elif action == TaskAction.ABORT_GRAPH:
+                return _TASK_ABORT
+            elif action == TaskAction.NOTE_EXIT:
+                return _TASK_NOTE_EXIT
+            return _TASK_SKIP  # fallback
 
 
 def _write_context_file(ai_dev_dir: Path, task_id: str, context_text: str) -> str:

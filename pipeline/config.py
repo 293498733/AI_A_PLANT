@@ -50,6 +50,7 @@ class TaskGraphConfig:
     project: str = ""
     created_at: str = ""
     total_estimated_turns: int = 0
+    max_workers: int = 3
     tasks: list[TaskConfig] = field(default_factory=list)
 
 
@@ -129,6 +130,7 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
         project=data.get("project", ""),
         created_at=data.get("created_at", ""),
         total_estimated_turns=data.get("total_estimated_turns", 0),
+        max_workers=data.get("max_workers", 3),
         tasks=tasks,
     )
 
