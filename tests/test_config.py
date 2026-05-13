@@ -39,6 +39,7 @@ class TestTaskConfig:
         assert t.reference_docs == []
         assert t.module == ""
         assert t.parallel_group is None
+        assert t.sub_pipeline is False
         assert t.retry_limit == 2
         assert t.timeout_minutes == 15
 

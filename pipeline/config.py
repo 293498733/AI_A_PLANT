@@ -38,6 +38,7 @@ class TaskConfig:
     reference_docs: list[str] = field(default_factory=list)
     module: str = ""          # 所属模块/子系统
     parallel_group: str | None = None
+    sub_pipeline: bool = False  # 大模块内走 mini-pipeline（方案→编码→测试→审查）
     retry_limit: int = 2
     timeout_minutes: int = 15
     sandbox_enabled: bool = True  # 任务是否在 git worktree 沙箱中执行
@@ -120,6 +121,7 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
             reference_docs=item.get("reference_docs", []),
             module=item.get("module", ""),
             parallel_group=item.get("parallel_group"),
+            sub_pipeline=item.get("sub_pipeline", False),
             retry_limit=item.get("retry_limit", 2),
             timeout_minutes=item.get("timeout_minutes", 15),
             sandbox_enabled=item.get("sandbox_enabled", True),

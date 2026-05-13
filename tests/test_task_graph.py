@@ -3,7 +3,8 @@ import threading
 from pathlib import Path
 from pipeline.task_graph import (
     _detect_cycle, _module_bar, _detect_residual_files, _write_context_file,
-    _execute_single_task, _get_verification_steps, _run_verification_step,
+    _execute_single_task, _run_sub_pipeline, _get_verification_steps,
+    _run_verification_step,
     _TASK_OK, _TASK_RETRY, _TASK_SKIP, _TASK_ABORT,
 )
 from pipeline.config import TaskConfig
@@ -254,6 +255,65 @@ class TestExecuteSingleTask:
         assert result == _TASK_OK
         # SandboxManager.create should not be called when sandbox disabled
         mocks["mock_sandbox"].create.assert_not_called()
+
+    def test_sub_pipeline_success(self, mocker, tmp_path):
+        """子管线：4 阶段全部成功 → 任务完成。"""
+        mocks = self._make_mocks(mocker, tmp_path)
+        task = self._make_task(sub_pipeline=True, estimated_turns=40)
+        (tmp_path / "out.py").write_text("# generated")
+
+        # Mock _run_sub_pipeline to succeed
+        mock_result = mocker.MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = ""
+        mocker.patch("pipeline.task_graph._run_sub_pipeline", return_value=(mock_result, None))
+
+        result = _execute_single_task(
+            tid="t1", task=task,
+            state_mgr=mocks["state_mgr"],
+            context_asm=mocks["context_asm"],
+            knowledge_mgr=mocks["knowledge_mgr"],
+            snapshot_mgr=mocks["snapshot_mgr"],
+            git=mocks["git"], git_available=True,
+            project_root=tmp_path, ai_dev_dir=tmp_path,
+            profile_path=tmp_path / "profile.yml",
+            task_recipe="recipe.yaml",
+            lock=mocks["lock"],
+        )
+
+        assert result == _TASK_OK
+        mocks["state_mgr"].mark_completed.assert_called_once()
+
+    def test_sub_pipeline_phase_fails(self, mocker, tmp_path):
+        """子管线某个阶段失败 → 任务失败。"""
+        mocks = self._make_mocks(mocker, tmp_path)
+        task = self._make_task(sub_pipeline=True)
+        (tmp_path / "out.py").write_text("# generated")
+
+        # Mock _run_sub_pipeline to return failure
+        mock_result = mocker.MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "phase code failed"
+        mocker.patch("pipeline.task_graph._run_sub_pipeline", return_value=(mock_result, None))
+
+        from pipeline.error_handler import TaskAction
+        mocker.patch("pipeline.task_graph.handle_task_error", return_value=TaskAction.RETRY_TASK)
+
+        result = _execute_single_task(
+            tid="t1", task=task,
+            state_mgr=mocks["state_mgr"],
+            context_asm=mocks["context_asm"],
+            knowledge_mgr=mocks["knowledge_mgr"],
+            snapshot_mgr=mocks["snapshot_mgr"],
+            git=mocks["git"], git_available=True,
+            project_root=tmp_path, ai_dev_dir=tmp_path,
+            profile_path=tmp_path / "profile.yml",
+            task_recipe="recipe.yaml",
+            lock=mocks["lock"],
+        )
+
+        assert result == _TASK_RETRY
+        mocks["state_mgr"].mark_failed.assert_called_once()
 
     def test_verification_passed(self, mocker, tmp_path):
         """验证步骤全部通过 → 任务成功。"""

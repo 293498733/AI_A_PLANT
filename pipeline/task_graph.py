@@ -294,7 +294,7 @@ def _execute_single_task(
     # === Execution (no lock — goose subprocess runs independently) ===
     task_start = time.time()
 
-    params = {
+    base_params = {
         "task_name": task.name,
         "task_description": task.description,
         "project_root": str(sandbox_path),
@@ -305,25 +305,40 @@ def _execute_single_task(
     def _on_task_timeout():
         logger.error(f"Task {tid}: watchdog timeout, sandbox preserved at {sandbox_path}")
 
-    try:
-        result = run_task(
-            recipe=task_recipe,
-            max_turns=task.estimated_turns,
-            params=params,
-            cwd=sandbox_path,
-            timeout_minutes=task.timeout_minutes,
-            on_timeout=_on_task_timeout,
+    if task.sub_pipeline:
+        # 子管线：方案 → 编码 → 测试 → 审查
+        result, run_exception = _run_sub_pipeline(
+            tid=tid,
+            task=task,
+            base_params=base_params,
+            sandbox_path=sandbox_path,
+            ai_dev_dir=ai_dev_dir,
+            context_text=context_text,
+            task_recipe=task_recipe,
             quiet=quiet,
+            on_timeout=_on_task_timeout,
         )
-    except Exception as e:
-        logger.error(f"Task {tid}: run_task exception: {e}")
-        result = None
-        run_exception = e
+        elapsed = int(time.time() - task_start)
+        mins, secs = divmod(elapsed, 60)
     else:
-        run_exception = None
-
-    elapsed = int(time.time() - task_start)
-    mins, secs = divmod(elapsed, 60)
+        try:
+            result = run_task(
+                recipe=task_recipe,
+                max_turns=task.estimated_turns,
+                params=base_params,
+                cwd=sandbox_path,
+                timeout_minutes=task.timeout_minutes,
+                on_timeout=_on_task_timeout,
+                quiet=quiet,
+            )
+        except Exception as e:
+            logger.error(f"Task {tid}: run_task exception: {e}")
+            result = None
+            run_exception = e
+        else:
+            run_exception = None
+        elapsed = int(time.time() - task_start)
+        mins, secs = divmod(elapsed, 60)
 
     # === Post-execution (under lock) ===
     with lock:
@@ -492,6 +507,91 @@ def _detect_residual_files(project_root: Path, task: TaskConfig) -> list[str]:
 
 
 VERIFY_TIMEOUT = 600  # 每步验证超时（秒）
+
+# 子管线阶段定义：(名称, 目标描述, 轮次比例)
+_SUB_PIPELINE_PHASES: list[tuple[str, str, float]] = [
+    ("plan",   "生成模块实现方案，输出设计文档", 0.25),
+    ("code",   "根据方案实现代码",               0.40),
+    ("test",   "为实现的代码编写测试",           0.20),
+    ("review", "审查代码和测试，修复发现的问题", 0.15),
+]
+
+
+def _run_sub_pipeline(
+    *,
+    tid: str,
+    task: TaskConfig,
+    base_params: dict[str, str],
+    sandbox_path: Path,
+    ai_dev_dir: Path,
+    context_text: str,
+    task_recipe: str,
+    quiet: bool,
+    on_timeout,
+) -> tuple:
+    """在沙箱内执行 mini-pipeline：方案→编码→测试→审查。
+
+    每个阶段是独立的 goose session，分配合适的 turns。
+    任一阶段失败则立即停止，保留沙箱供排查。
+
+    Returns:
+        (result, run_exception) — result 为最后一个阶段的 CompletedProcess 或失败时的 None
+    """
+    accumulated_context = context_text
+    total_turns = task.estimated_turns
+
+    for phase_idx, (phase_name, phase_goal, turn_fraction) in enumerate(_SUB_PIPELINE_PHASES):
+        phase_turns = max(5, int(total_turns * turn_fraction))
+        phase_timeout = max(5, int(task.timeout_minutes * turn_fraction))
+
+        # 构建阶段专用上下文
+        phase_context = (
+            f"{accumulated_context}\n\n"
+            f"---\n"
+            f"## 当前阶段 ({phase_idx + 1}/{len(_SUB_PIPELINE_PHASES)}): {phase_name}\n"
+            f"目标: {phase_goal}\n"
+            f"---\n"
+        )
+        phase_ctx_file = _write_context_file(ai_dev_dir, f"{tid}_{phase_name}", phase_context)
+
+        phase_params = {
+            **base_params,
+            "context_file": phase_ctx_file,
+            "phase": phase_name,
+            "phase_goal": phase_goal,
+        }
+
+        print(f"    📋 {phase_name} ({phase_turns} turns)...", flush=True)
+        logger.info(f"Task {tid}: sub-pipeline phase {phase_name} ({phase_turns} turns)")
+
+        try:
+            result = run_task(
+                recipe=task_recipe,
+                max_turns=phase_turns,
+                params=phase_params,
+                cwd=sandbox_path,
+                timeout_minutes=phase_timeout,
+                on_timeout=on_timeout,
+                quiet=quiet,
+            )
+        except Exception as e:
+            logger.error(f"Task {tid}: sub-pipeline phase '{phase_name}' exception: {e}")
+            return None, e
+
+        if result.returncode != 0:
+            logger.error(f"Task {tid}: sub-pipeline phase '{phase_name}' failed (exit {result.returncode})")
+            print(f"    ❌ {phase_name} 失败", flush=True)
+            return result, None
+
+        print(f"    ✅ {phase_name} 完成", flush=True)
+
+        # 将本阶段产出摘要追加到累积上下文，供下一阶段引用
+        accumulated_context += (
+            f"\n\n### 阶段 {phase_idx + 1} ({phase_name}) 完成\n"
+            f"目标: {phase_goal}\n"
+        )
+
+    return result, None
 
 
 def _get_verification_steps(profile: dict) -> list[tuple[str, list[str]]]:
