@@ -107,12 +107,15 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
 
     tasks = []
     for item in data.get("tasks", []):
+        if "id" not in item:
+            logger.warning(f"Skipping task without 'id': {item.get('name', str(item)[:80])}")
+            continue
         tasks.append(TaskConfig(
             id=item["id"],
-            name=item["name"],
-            description=item["description"],
+            name=item.get("name", item["id"]),
+            description=item.get("description", ""),
             category=item.get("category", ""),
-            estimated_turns=item["estimated_turns"],
+            estimated_turns=item.get("estimated_turns", 40),
             priority=item.get("priority", "P1"),
             depends_on=item.get("depends_on", []),
             input_files=item.get("input_files", []),
@@ -138,8 +141,67 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
 
 
 def load_profile(profile_path: Path) -> dict | None:
-    """加载项目画像文件。"""
+    """加载项目画像文件。YAML 语法错误时自动修复重试一次；仍失败则回退到最小可用模板。"""
     if not profile_path.exists():
         return None
     with open(profile_path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        text = f.read()
+    try:
+        return yaml.safe_load(text)
+    except yaml.YAMLError:
+        logger.warning("profile.yml has YAML syntax errors, attempting auto-repair")
+        repaired = _repair_yaml(text)
+        try:
+            yaml.safe_load(repaired)
+            profile_path.write_text(repaired, encoding="utf-8")
+            logger.info("profile.yml auto-repaired and saved")
+            return yaml.safe_load(repaired)
+        except yaml.YAMLError as e:
+            logger.warning(f"profile.yml repair failed, falling back to minimal template: {e}")
+            fallback = _make_minimal_profile(text)
+            profile_path.write_text(yaml.dump(fallback, allow_unicode=True), encoding="utf-8")
+            logger.info("profile.yml replaced with minimal template")
+            return fallback
+
+
+def _repair_yaml(text: str) -> str:
+    """修复 goose 生成 profile.yml 时的常见 YAML 语法错误：未加引号的值。"""
+    import re
+    lines = text.splitlines()
+    fixed = []
+    for line in lines:
+        m = re.match(r'^(\s+)([\w-]+):\s+(.+)', line)
+        if m and '\"' not in m.group(3).lstrip() and '\'' not in m.group(3).lstrip():
+            val = m.group(3)
+            if re.search(r'[(){}\[\]]|^@', val):
+                val = val.replace('\"', '\\"')
+                line = f'{m.group(1)}{m.group(2)}: "{val}"'
+        fixed.append(line)
+    return '\n'.join(fixed)
+
+
+def _make_minimal_profile(text: str) -> dict:
+    """从破损 YAML 中提取可用的 JDK/Framework 信息，构造最小可用 profile。"""
+    import re
+    profile: dict = {
+        "profile": "java-spring",
+        "description": "Auto-generated minimal profile (original YAML was unrepairable)",
+        "projectRules": {},
+        "backend": {"language": "Java", "jdk": {"compileRelease": 17}, "buildTool": "Maven"},
+        "commands": {
+            "compileOnly": ["mvn -DskipTests compile"],
+            "test": ["mvn test"],
+        },
+    }
+
+    # 尝试从 text 中提取 java.version
+    m = re.search(r'<java\.version>(\d+)</java\.version>', text)
+    if m:
+        profile["backend"]["jdk"]["compileRelease"] = int(m.group(1))
+
+    # 尝试从 text 中提取项目名
+    m = re.search(r'profile:\s*(\S+)', text)
+    if m:
+        profile["profile"] = m.group(1)
+
+    return profile

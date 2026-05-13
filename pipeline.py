@@ -24,12 +24,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipeline import __version__
 from pipeline.logger import init as init_logger, get as get_logger
-from pipeline.config import load_pipeline
+from pipeline.config import load_pipeline, load_profile as load_project_profile
 from pipeline.state import (
     read_stage, write_stage, clear_stage,
     read_note, write_note, clear_note,
 )
-from pipeline.executor import check_goose, run_stage, GooseError, GooseNotFound
+from pipeline.executor import check_goose, run_stage, GooseError, GooseNotFound, detect_jdk, JdkNotFound
 from pipeline.checkpoint import confirm, ask_boolean, set_ci_mode as set_checkpoint_ci
 from pipeline.error_handler import handle_error, Action, set_ci_mode as set_error_ci
 from pipeline.task_graph import execute_task_graph
@@ -198,8 +198,11 @@ def main():
     existing_stage = read_stage(AD)
     has_outputs = list(OUT.glob("*")) if OUT.exists() else []
 
-    if args.new_run:
+    if args.new_run and not args.from_stage:
         _clean_outputs(AD, OUT)
+    elif args.new_run and args.from_stage:
+        # from_stage 时不清除旧产出（需要之前阶段生成的文件）
+        logger.info("--from-stage 模式，不清除旧产出")
     elif has_outputs and not existing_stage:
         print()
         print(SEPARATOR)
@@ -218,6 +221,23 @@ def main():
     except GooseNotFound as e:
         logger.error(str(e))
         sys.exit(1)
+
+    # JDK 自动检测（供阶段级 goose 子进程使用）
+    stage_env: dict[str, str] = {}
+    try:
+        _profile = load_project_profile(profile_path) if profile_path.exists() else None
+        if _profile:
+            jdk_required = int(_profile.get("backend", {}).get("jdk", {}).get("compileRelease", 17))
+        else:
+            jdk_required = 17
+        jdk_home = detect_jdk(jdk_required)
+        stage_env["JAVA_HOME"] = jdk_home
+        logger.info(f"JDK {jdk_required} detected: {jdk_home}")
+        print(f"  JDK 检测: {jdk_home}")
+    except JdkNotFound as e:
+        logger.warning(str(e))
+    except Exception:
+        pass  # profile 可能还不存在，Phase 0 会生成
 
     # 检查 API Key
     api_key = os.environ.get("CUSTOM_DEEPSEEK_API_KEY")
@@ -394,6 +414,7 @@ def main():
                     params=expanded_params,
                     cwd=P,
                     quiet=not args.verbose,
+                    env=stage_env or None,
                 )
 
                 print()

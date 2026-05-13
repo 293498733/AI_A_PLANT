@@ -244,7 +244,6 @@ def execute_task_graph(
 
             if abort:
                 return False, state_mgr.tasks
-            # retry_needed → 重新计算 ready 列表（RETRY 任务已重置为 PENDING）
             if retry_needed:
                 continue
 
@@ -335,6 +334,7 @@ def _execute_single_task(
             task_recipe=task_recipe,
             quiet=quiet,
             on_timeout=_on_task_timeout,
+            env=verify_env or None,
         )
         elapsed = int(time.time() - task_start)
         mins, secs = divmod(elapsed, 60)
@@ -348,6 +348,7 @@ def _execute_single_task(
                 timeout_minutes=task.timeout_minutes,
                 on_timeout=_on_task_timeout,
                 quiet=quiet,
+                env=verify_env or None,
             )
         except Exception as e:
             logger.error(f"Task {tid}: run_task exception: {e}")
@@ -483,7 +484,7 @@ def _execute_single_task(
             if sandbox:
                 logger.warning(f"Task {tid} failed, sandbox preserved at: {sandbox_path}")
             state_mgr.mark_failed(tid,
-                f"goose exit {result.returncode}: {result.stderr[:200]}")
+                f"goose exit {result.returncode}: {result.stderr[:500]}")
             state_mgr.save()
             print(f"  ❌ 失败 ({mins}m{secs}s)")
 
@@ -560,6 +561,7 @@ def _run_sub_pipeline(
     task_recipe: str,
     quiet: bool,
     on_timeout,
+    env: dict[str, str] | None = None,
 ) -> tuple:
     """在沙箱内执行 mini-pipeline：方案→编码→测试→审查。
 
@@ -605,6 +607,7 @@ def _run_sub_pipeline(
                 timeout_minutes=phase_timeout,
                 on_timeout=on_timeout,
                 quiet=quiet,
+                env=env,
             )
         except Exception as e:
             logger.error(f"Task {tid}: sub-pipeline phase '{phase_name}' exception: {e}")
@@ -662,6 +665,9 @@ def _run_verification_step(
     merged_env = None
     if env:
         merged_env = {**os.environ, **env}
+        logger.debug(f"Verification env: JAVA_HOME={merged_env.get('JAVA_HOME', 'NOT SET')}")
+    else:
+        logger.debug(f"Verification env: None (inheriting system JAVA_HOME={os.environ.get('JAVA_HOME', 'NOT SET')})")
     for cmd in commands:
         try:
             proc = subprocess.run(

@@ -1,5 +1,6 @@
 """goose CLI 调用封装 — 实时输出、看门狗超时、日志捕获。"""
 
+import os
 import sys
 import time
 import shutil
@@ -56,17 +57,22 @@ def _build_args(recipe: str, max_turns: int, params: dict[str, str], quiet: bool
     return args
 
 
-def _spawn(args: list[str], cwd: Path) -> subprocess.Popen:
-    """启动 goose 子进程，捕获 stdout/stderr 管道。"""
+def _spawn(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.Popen:
+    """启动 goose 子进程，捕获 stdout/stderr 管道。env 合并入子进程环境。"""
+    proc_env = None
+    if env:
+        proc_env = {**os.environ, **env}
     try:
         return subprocess.Popen(
             args,
             cwd=str(cwd),
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=proc_env,
         )
     except FileNotFoundError:
         raise GooseNotFound("goose CLI not found in PATH")
@@ -113,15 +119,14 @@ def _run_with_watchdog(
     cwd: Path,
     timeout_seconds: int | None,
     on_timeout=None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """核心执行逻辑：线程化 I/O + 可选的看门狗超时控制。
 
-    - stdout 读取在 daemon 线程中执行，实时打印到终端
-    - stderr 读取在 daemon 线程中执行，捕获到日志
-    - 主线程等待进程退出，看门狗在超时后强制终止进程树
+    env 注入自定义环境变量（如 JAVA_HOME）到 goose 子进程。
     """
 
-    proc = _spawn(args, cwd)
+    proc = _spawn(args, cwd, env=env)
 
     stderr_lines: list[str] = []
     stdout_lines: list[str] = []
@@ -218,11 +223,13 @@ def run_stage(
     cwd: Path | None = None,
     timeout_minutes: int | None = None,
     quiet: bool = True,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """执行 goose recipe 阶段。
 
     timeout_minutes=None 时无超时限制（阶段级执行），>0 时启用心跳看门狗。
     quiet=True 时传 -q 给 goose，隐藏文件扫描噪音，仅显示模型回复。
+    env 注入自定义环境变量（如 JAVA_HOME）。
     """
     recipe_path = Path(recipe)
     args = _build_args(str(recipe_path), max_turns, params, quiet=quiet)
@@ -232,7 +239,7 @@ def run_stage(
     logger.debug(f"stage params: {params}")
 
     timeout_secs = (timeout_minutes * 60) if timeout_minutes else None
-    return _run_with_watchdog(args, cwd or Path.cwd(), timeout_secs)
+    return _run_with_watchdog(args, cwd or Path.cwd(), timeout_secs, env=env)
 
 
 def run_task(
@@ -243,11 +250,13 @@ def run_task(
     timeout_minutes: int = 15,
     on_timeout=None,
     quiet: bool = True,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """执行单个任务。与 run_stage 相同流程，但始终启用心跳看门狗超时控制。
 
     on_timeout 在进程被看门狗终止后调用（用于沙箱清理等）。
     quiet=True 时传 -q 给 goose，隐藏文件扫描噪音，仅显示模型回复。
+    env 注入自定义环境变量（如 JAVA_HOME）。
     """
     recipe_path = Path(recipe)
     args = _build_args(str(recipe_path), max_turns, params, quiet=quiet)
@@ -255,8 +264,9 @@ def run_task(
     logger.info(f"task: goose run --recipe {recipe_path.name} --max-turns {max_turns}" +
                 (" -q" if quiet else ""))
     logger.debug(f"task params: {params}")
+    logger.debug(f"goose args: {args}")
 
-    return _run_with_watchdog(args, cwd, timeout_minutes * 60, on_timeout=on_timeout)
+    return _run_with_watchdog(args, cwd, timeout_minutes * 60, on_timeout=on_timeout, env=env)
 
 
 class JdkNotFound(Exception):

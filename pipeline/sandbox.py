@@ -67,6 +67,30 @@ class SandboxManager:
         except FileNotFoundError:
             raise SandboxCreateError("git not found in PATH")
 
+        # 初始化子模块 — 从主项目本地拷贝（避免网络依赖）
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(self._project),
+                 "submodule", "status"],
+                capture_output=True, text=True, timeout=10,
+            )
+            for line in result.stdout.strip().splitlines():
+                if not line.strip():
+                    continue
+                # 格式: " hash submodule_path (branch)"
+                parts = line.lstrip(" +-").split()
+                if len(parts) >= 2:
+                    sub_path = parts[1]
+                    src = self._project / sub_path
+                    dst = self._sandbox_path / sub_path
+                    if src.exists() and src.is_dir():
+                        # 仅当目标为空或不存在时才拷贝
+                        if not dst.exists() or not any(dst.iterdir()):
+                            logger.info(f"Copying submodule '{sub_path}' to sandbox (local)")
+                            _robocopy_tree(src, dst)
+        except Exception as e:
+            logger.warning(f"Submodule copy failed (non-fatal): {e}")
+
         logger.info(f"Sandbox created: {self._sandbox_path}")
         return self._sandbox_path
 
@@ -197,3 +221,34 @@ class SandboxManager:
             logger.info(f"Cleaned {len(cleaned)} orphaned sandbox(es)")
 
         return cleaned
+
+
+def _robocopy_tree(src: Path, dst: Path) -> None:
+    """递归复制目录树，跳过 .git 目录。robocopy 不可用时回退到 Python。"""
+    import shutil as _shutil
+    # 优先使用 robocopy（Windows 上更快且无 MAX_PATH 问题）
+    try:
+        result = subprocess.run(
+            [
+                "robocopy", str(src), str(dst),
+                "/E", "/NFL", "/NDL", "/NJH", "/NJS",
+                "/XD", ".git",
+            ],
+            timeout=120,
+        )
+        # robocopy 返回码 0-7 表示成功
+        if result.returncode < 8:
+            return
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Fallback: Python 递归复制
+    dst.mkdir(parents=True, exist_ok=True)
+    for item in src.iterdir():
+        if item.name == ".git":
+            continue
+        target = dst / item.name
+        if item.is_dir():
+            _robocopy_tree(item, target)
+        else:
+            _shutil.copy2(item, target)
