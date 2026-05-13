@@ -70,5 +70,5 @@ class TestRunStage:
         try:
             run_stage(recipe="test.yaml", max_turns=10, params={}, cwd=None)
             assert False, "should have raised"
-        except FileNotFoundError:
+        except GooseNotFound:
             pass
