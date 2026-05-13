@@ -98,7 +98,7 @@ def load_pipeline(path: Path) -> PipelineConfig:
 
 
 def load_task_graph(path: Path) -> TaskGraphConfig:
-    """从 tasks.yaml 加载任务图定义。"""
+    """从 tasks.yaml 加载任务图定义。自动跳过无效任务并校验依赖引用。"""
     if not path.exists():
         raise FileNotFoundError(f"task graph config not found: {path}")
 
@@ -106,17 +106,41 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
         data = yaml.safe_load(f)
 
     tasks = []
+    task_ids: set[str] = set()
+    skipped = 0
     for item in data.get("tasks", []):
-        if "id" not in item:
+        tid = item.get("id")
+        if not tid:
             logger.warning(f"Skipping task without 'id': {item.get('name', str(item)[:80])}")
+            skipped += 1
             continue
+        if tid in task_ids:
+            logger.warning(f"Skipping duplicate task id: {tid}")
+            skipped += 1
+            continue
+        task_ids.add(tid)
+
+        # 校验 estimated_turns 合理范围
+        turns = item.get("estimated_turns", 40)
+        if not isinstance(turns, (int, float)) or turns < 1:
+            logger.warning(f"Task {tid}: invalid estimated_turns={turns}, using 40")
+            turns = 40
+        if isinstance(turns, float):
+            turns = int(turns)
+
+        # 校验 priority
+        priority = item.get("priority", "P1")
+        if priority not in ("P0", "P1", "P2"):
+            logger.warning(f"Task {tid}: invalid priority={priority}, using P1")
+            priority = "P1"
+
         tasks.append(TaskConfig(
-            id=item["id"],
-            name=item.get("name", item["id"]),
+            id=tid,
+            name=item.get("name", tid),
             description=item.get("description", ""),
             category=item.get("category", ""),
-            estimated_turns=item.get("estimated_turns", 40),
-            priority=item.get("priority", "P1"),
+            estimated_turns=turns,
+            priority=priority,
             depends_on=item.get("depends_on", []),
             input_files=item.get("input_files", []),
             output_files=item.get("output_files", []),
@@ -129,6 +153,15 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
             timeout_minutes=item.get("timeout_minutes", 15),
             sandbox_enabled=item.get("sandbox_enabled", True),
         ))
+
+    # 后校验：检查 depends_on 引用的 task_id 是否存在
+    for t in tasks:
+        for dep in t.depends_on:
+            if dep not in task_ids:
+                logger.warning(f"Task {t.id}: depends_on '{dep}' does not exist — treating as external")
+
+    if skipped:
+        logger.warning(f"Skipped {skipped} invalid task(s) in {path}")
 
     return TaskGraphConfig(
         version=data.get("version", "1.0"),
