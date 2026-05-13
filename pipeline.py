@@ -31,6 +31,7 @@ from pipeline.executor import check_goose, run_stage, GooseError, GooseNotFound
 from pipeline.checkpoint import confirm, ask_boolean, set_ci_mode as set_checkpoint_ci
 from pipeline.error_handler import handle_error, Action, set_ci_mode as set_error_ci
 from pipeline.task_graph import execute_task_graph
+from pipeline.git_ops import GitOps
 
 SEPARATOR = "=" * 60
 
@@ -418,7 +419,13 @@ def main():
                     stage_times.append((stage.name, elapsed, "⚠️ 异常"))
                     break
 
-    # 全部完成 — 打印运行摘要
+    # 全部完成 — 推送所有提交
+    try:
+        git = GitOps(P)
+        git.push()
+    except RuntimeError:
+        pass  # 非 git 仓库，跳过
+
     total_elapsed = time.time() - pipeline_start
     clear_stage(AD)
 

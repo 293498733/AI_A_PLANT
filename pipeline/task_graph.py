@@ -1,4 +1,4 @@
-"""任务图执行器 — 依赖拓扑排序 + 逐任务 fresh session 执行。"""
+"""任务图执行器 — 依赖拓扑排序 + 逐任务 fresh session 执行（沙箱隔离）。"""
 
 import time
 import logging
@@ -15,6 +15,7 @@ from pipeline.knowledge_accumulator import KnowledgeAccumulator
 from pipeline.git_ops import GitOps
 from pipeline.executor import run_task
 from pipeline.error_handler import handle_task_error, TaskAction
+from pipeline.sandbox import SandboxManager, SandboxCreateError
 
 logger = logging.getLogger("ai-dev-flow")
 
@@ -48,6 +49,9 @@ def execute_task_graph(
     modules = {tid: t.module for tid, t in tasks.items() if t.module}
     state_mgr = TaskStateManager(ai_dev_dir, task_ids, dependencies, modules)
     state_mgr.reset_in_progress()  # 崩溃恢复
+
+    # 清理上次崩溃可能留下的残留 sandbox
+    SandboxManager.cleanup_orphaned(project_root, ai_dev_dir)
 
     # 自动跳过已耗尽重试的失败任务
     for tid in task_ids:
@@ -142,69 +146,95 @@ def execute_task_graph(
                     print(f"  模块: {task.module} {bar}")
             print(SEPARATOR)
 
-            # Git pre-check
+            # Git pre-check (on real project)
             if git_available and git:
                 git.pre_task_check()
 
-            # 检测上次崩溃残留的半成品文件
-            residual = _detect_residual_files(project_root, task)
-            if residual:
-                logger.warning(f"Task {tid}: 检测到崩溃残留文件 {residual}，自动清理")
-                for f in residual:
-                    (project_root / f).unlink(missing_ok=True)
-
             # 上下文组装（含历史决策注入）
             ctx = context_asm.assemble(task)
-            # 注入相关历史知识
             relevant_knowledge = knowledge_mgr.query(task.category)
             if relevant_knowledge:
                 ctx.context_notes += "\n\n### Relevant Past Decisions\n" + "\n---\n".join(relevant_knowledge)
             context_text = context_asm.render_prompt(task, ctx)
-
-            # 构建参数
-            params = {
-                "task_name": task.name,
-                "task_description": task.description,
-                "project_root": str(project_root),
-                "profile": str(profile_path),
-                "context_file": _write_context_file(ai_dev_dir, tid, context_text),
-            }
 
             state_mgr.mark_in_progress(tid)
             state_mgr.save()
 
             task_start = time.time()
 
+            # 创建沙箱（可选择跳过）
+            sandbox = None
+            sandbox_path = project_root
+            if task.sandbox_enabled:
+                sandbox = SandboxManager(project_root, ai_dev_dir)
+                try:
+                    sandbox_path = sandbox.create(task.id)
+                except SandboxCreateError as e:
+                    logger.error(f"Sandbox create failed for {tid}: {e}")
+                    logger.warning(f"Falling back to non-sandboxed execution for {tid}")
+                    sandbox_path = project_root
+                    sandbox = None  # 标记未使用沙箱
+
+            # 构建参数（project_root 指向沙箱）
+            params = {
+                "task_name": task.name,
+                "task_description": task.description,
+                "project_root": str(sandbox_path),
+                "profile": str(profile_path),
+                "context_file": _write_context_file(ai_dev_dir, tid, context_text),
+            }
+
+            def _on_task_timeout():
+                logger.error(f"Task {tid}: watchdog timeout, sandbox preserved at {sandbox_path}")
+
             try:
                 result = run_task(
                     recipe=str(Path(__file__).resolve().parent.parent / task_recipe),
                     max_turns=task.estimated_turns,
                     params=params,
-                    cwd=project_root,
+                    cwd=sandbox_path,
                     timeout_minutes=task.timeout_minutes,
+                    on_timeout=_on_task_timeout,
                 )
 
                 elapsed = int(time.time() - task_start)
                 mins, secs = divmod(elapsed, 60)
 
                 if result.returncode == 0:
-                    # 验证输出文件
+                    # 验证沙箱中的产出文件
                     missing = [f for f in task.output_files
-                               if not (project_root / f).exists()]
+                               if not (sandbox_path / f).exists()]
                     if missing:
-                        logger.warning(f"Task {tid} completed but missing: {missing}")
-                        # 仍然标记完成，但记录警告
+                        logger.warning(f"Task {tid} completed but missing in sandbox: {missing}")
+                        if sandbox:
+                            logger.warning(f"Sandbox preserved at: {sandbox_path}")
                         state_mgr.mark_completed(tid, "", task.output_files)
                         state_mgr.save()
                         print(f"  ⚠️ 完成 ({mins}m{secs}s) — 但缺少文件: {missing}")
                     else:
-                        # Git commit
+                        # 检测非预期修改
+                        if sandbox:
+                            extra = sandbox.detect_extra_modifications(
+                                set(task.output_files)
+                            )
+                            if extra:
+                                logger.warning(f"Task {tid} modified undeclared files: {extra}")
+
+                        # 从沙箱同步产出文件到真实项目
+                        if sandbox:
+                            synced = sandbox.sync_outputs(task.output_files)
+                            logger.info(f"Synced {len(synced)} files from sandbox")
+                            sandbox.destroy()
+
+                        # 在真实项目上 git commit
                         commit_hash = ""
                         if git_available and git:
                             commit_hash = git.commit_task(
                                 tid, task.name, task.category,
                                 task.priority, task.estimated_turns
                             ) or ""
+                            if commit_hash:
+                                git.push()
                         state_mgr.mark_completed(tid, commit_hash, task.output_files)
                         state_mgr.save()
                         snapshot_mgr.update_snapshot()
@@ -216,6 +246,9 @@ def execute_task_graph(
                               (f" — {commit_hash}" if commit_hash else ""))
                     completed_ids.add(tid)
                 else:
+                    # 失败 — 保留沙箱供排查
+                    if sandbox:
+                        logger.warning(f"Task {tid} failed, sandbox preserved at: {sandbox_path}")
                     state_mgr.mark_failed(tid,
                         f"goose exit {result.returncode}: {result.stderr[:200]}")
                     state_mgr.save()
@@ -242,6 +275,8 @@ def execute_task_graph(
 
             except Exception as e:
                 logger.error(f"Task {tid} exception: {e}")
+                if sandbox:
+                    logger.warning(f"Task {tid} exception, sandbox preserved at: {sandbox_path}")
                 state_mgr.mark_failed(tid, str(e))
                 state_mgr.save()
                 action = handle_task_error(

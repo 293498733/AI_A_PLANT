@@ -56,6 +56,61 @@ class GitOps:
         logger.info(f"Task {task_id} committed: {commit_hash}")
         return commit_hash
 
+    def commit_files(self, file_paths: list[str], task_id: str, task_name: str,
+                     category: str, priority: str,
+                     estimated_turns: int) -> str | None:
+        """仅 stage 指定文件并提交。无变更时返回 None。"""
+        if not file_paths:
+            return None
+
+        for fp in file_paths:
+            subprocess.run(
+                ["git", "-C", str(self.repo), "add", fp],
+                capture_output=True, text=True,
+            )
+
+        message = (
+            f"[ai-dev-flow] {task_id}: {task_name}\n\n"
+            f"Category: {category}\n"
+            f"Priority: {priority}\n"
+            f"Estimated turns: {estimated_turns}"
+        )
+        result = subprocess.run(
+            ["git", "-C", str(self.repo), "commit", "-m", message],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            logger.error(f"Git commit failed: {result.stderr}")
+            return None
+
+        hash_result = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        )
+        commit_hash = hash_result.stdout.strip()[:8]
+        logger.info(f"Task {task_id} committed ({len(file_paths)} files): {commit_hash}")
+        return commit_hash
+
+    def push(self) -> bool:
+        """推送所有本地提交到 origin。失败时返回 False 不抛异常。"""
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(self.repo), "push", "origin", "main"],
+                capture_output=True, text=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                logger.warning(f"Git push failed: {result.stderr.strip()}")
+                return False
+            logger.info("Pushed to origin/main")
+            return True
+        except subprocess.TimeoutExpired:
+            logger.warning("Git push timed out")
+            return False
+        except Exception:
+            logger.warning("Git push failed (network/permission)")
+            return False
+
     def pre_task_check(self) -> bool:
         """检查工作区是否干净，不干净时自动 stash。"""
         status = subprocess.run(
