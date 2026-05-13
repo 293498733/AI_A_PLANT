@@ -29,11 +29,11 @@
 
 ---
 
-## 🔄 实施中 — v4.0 升级改造
+## ⏸️ 搁置 — v4.0 升级改造
 
 > 目标：从独立编排引擎 → Multica 标准执行层
-> 方案：`temp/FINAL-改造执行方案.md`
-> 输入：`D:\MyPrj\test\ai-dev-flow升级改造方案.md` + `AI研发体系接入规范.md`
+> 状态：已搁置，优先 P1 执行能力增强
+> 输入文档外部仍有：`D:\MyPrj\test\ai-dev-flow升级改造方案.md` + `D:\MyPrj\test\AI研发体系接入规范.md`
 
 ### 第 1 周：安全 + 多模型
 
