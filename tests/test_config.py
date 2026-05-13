@@ -115,6 +115,23 @@ class TestLoadTaskGraph:
         assert graph.tasks[1].timeout_minutes == 20
         assert graph.tasks[2].parallel_group == "ui"
         assert graph.total_estimated_turns == 120
+        assert graph.max_workers == 3  # default
+
+    def test_custom_max_workers(self, tmp_path):
+        yaml_file = tmp_path / "tasks.yaml"
+        yaml_file.write_text("""
+version: "1.0"
+project: "test"
+total_estimated_turns: 10
+max_workers: 5
+tasks:
+  - id: t1
+    name: "Test"
+    description: "Desc"
+    estimated_turns: 10
+""")
+        graph = load_task_graph(yaml_file)
+        assert graph.max_workers == 5
 
     def test_file_not_found(self, tmp_path):
         try:
