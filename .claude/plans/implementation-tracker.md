@@ -56,6 +56,13 @@
 - 任一阶段失败立即停止，保留沙箱供排查
 - 191 个测试（新增 2 个 sub_pipeline 测试 + 1 个 config 测试）
 
+### v3.7.0 — Bug 修复 + JDK 自动检测 (2026-05-13)
+- `detect_jdk(required_version)`：扫描系统 JDK 安装，匹配主版本返回 JAVA_HOME
+- `_run_verification_step(env=...)`：注入 JAVA_HOME 到验证子进程，解决沙箱编译失败
+- **修复**：产出文件缺失时不再标记 completed → 走 error_handler 决策（重试/跳过）
+- **修复**：`--new` 清理 task_state.json + tasks.yaml + 残留沙箱 worktree
+- 197 个测试（新增 5 个 detect_jdk 测试 + 1 个 _parse_javac_version 测试）
+
 ---
 
 ## ⏸️ 搁置 — v4.0 升级改造

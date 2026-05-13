@@ -75,11 +75,24 @@ def _clean_outputs(AD: Path, OUT: Path) -> None:
             if f.is_file():
                 f.unlink()
                 cleaned.append(f.name)
-    for name in [".pipeline_stage", ".pipeline_note", "requirement-raw.md", "requirement.md"]:
+    for name in [
+        ".pipeline_stage", ".pipeline_note",
+        "requirement-raw.md", "requirement.md",
+        "task_state.json", "tasks.yaml",
+    ]:
         f = AD / name
         if f.exists():
             f.unlink()
             cleaned.append(name)
+    # 清理残留沙箱 worktree
+    sandboxes_dir = AD / "sandboxes"
+    if sandboxes_dir.exists():
+        import shutil as _shutil
+        try:
+            _shutil.rmtree(sandboxes_dir)
+            cleaned.append("sandboxes/")
+        except Exception:
+            pass
     if cleaned:
         print(f"  已清除: {', '.join(cleaned)}")
 

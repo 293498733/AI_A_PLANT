@@ -1,31 +1,31 @@
 # 开发状态追踪
 
-> 最后更新: 2026-05-13 | 当前版本: v3.6.0
+> 最后更新: 2026-05-13 | 当前版本: v3.7.0
 
 ## 模块状态
 
 | 模块 | 状态 | 版本 | 说明 |
 |------|------|------|------|
-| `pipeline/__init__.py` | ✅ | v3.6 | 版本号 3.6.0 |
+| `pipeline/__init__.py` | ✅ | v3.7 | 版本号 3.7.0 |
 | `pipeline/logger.py` | ✅ | 完成 | 结构化日志 |
 | `pipeline/state.py` | ✅ | v3.1 | 阶段/任务状态读写（原子写入） |
-| `pipeline/config.py` | ✅ | v3.6 | StageConfig + TaskConfig + TaskGraphConfig（max_workers + sub_pipeline） |
-| `pipeline/executor.py` | ✅ | v3.5 | Popen + 看门狗 + 线程化 I/O + 心跳 + quiet 输出 |
+| `pipeline/config.py` | ✅ | v3.6 | StageConfig + TaskConfig + TaskGraphConfig |
+| `pipeline/executor.py` | ✅ | v3.7 | Popen + 看门狗 + 线程化 I/O + 心跳 + quiet + JDK 检测 |
 | `pipeline/checkpoint.py` | ⚠️ 待废弃 | v3.1 | 人工确认（v4.0 废弃） |
 | `pipeline/error_handler.py` | ✅ | v3.1 | 双层级错误处理 + CI 自动决策 |
 | `pipeline/task_state.py` | ✅ | v3.1 | TaskStateManager |
 | `pipeline/task_context.py` | ✅ | v3.1 | ContextAssembler |
-| `pipeline/task_graph.py` | ✅ | v3.6 | 任务图执行器 + 并发控制 + 验证闭环 + 静默输出 + 子管线 |
+| `pipeline/task_graph.py` | ✅ | v3.7 | 任务图执行器 + 并发 + 验证闭环（JDK 注入）+ 静默 + 子管线 |
 | `pipeline/git_ops.py` | ✅ | v3.2 | Git 自动提交 + commit_files() |
 | `pipeline/snapshot.py` | ✅ | 完成 | SnapshotManager |
 | `pipeline/semantic_summarizer.py` | ✅ | 完成 | 8 语言语义提取 |
 | `pipeline/knowledge_accumulator.py` | ✅ | 完成 | KnowledgeAccumulator |
 | `pipeline/sandbox.py` | ✅ | v3.2 | Git worktree 沙箱管理器 |
 | `pipeline/watchdog.py` | ✅ | v3.2 | 进程看门狗（taskkill /F /T） |
-| `pipeline.py` | ✅ | v3.2 | CLI 入口 |
+| `pipeline.py` | ✅ | v3.7 | CLI 入口 + --new 清理沙箱/task_state |
 | `pipeline.yaml` | ✅ | v3.1 | 12 阶段定义 |
 | Recipe 文件 (10) | ✅ | v3.1 | Phase 0-7 + task-template |
-| `tests/` (15 文件) | ✅ | v3.4 | 189 测试覆盖全模块 |
+| `tests/` (15 文件) | ✅ | v3.7 | 197 测试覆盖全模块 |
 | `.github/workflows/test.yml` | ✅ | 完成 | GitHub Actions CI |
 
 ## 已修复 Bug

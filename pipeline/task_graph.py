@@ -4,6 +4,7 @@ v3.3: 并发上限控制 — ThreadPoolExecutor + parallel_group 分组 + max_wo
 v3.4: 单任务验证闭环 — goose 产出后沙箱内编译+测试，全部通过才 sync。
 """
 
+import os
 import time
 import logging
 import subprocess
@@ -21,7 +22,7 @@ from pipeline.task_context import ContextAssembler
 from pipeline.snapshot import SnapshotManager
 from pipeline.knowledge_accumulator import KnowledgeAccumulator
 from pipeline.git_ops import GitOps
-from pipeline.executor import run_task
+from pipeline.executor import run_task, detect_jdk, JdkNotFound
 from pipeline.error_handler import handle_task_error, TaskAction
 from pipeline.sandbox import SandboxManager, SandboxCreateError
 
@@ -107,9 +108,23 @@ def execute_task_graph(
     # 加载 profile 并提取验证步骤
     profile = load_profile(profile_path) or {}
     verification_steps = _get_verification_steps(profile)
+
+    # JDK 自动检测（验证步骤需要 Java 时）
+    verify_env: dict[str, str] = {}
     if verification_steps:
         labels = [label for label, _ in verification_steps]
         print(f"  验证闭环: {' → '.join(labels)}")
+        try:
+            jdk_required = int(profile.get("backend", {}).get("jdk", {}).get("compileRelease", 17))
+        except (TypeError, ValueError):
+            jdk_required = 17
+        try:
+            jdk_home = detect_jdk(jdk_required)
+            verify_env["JAVA_HOME"] = jdk_home
+            print(f"  JDK 检测: {jdk_home}")
+        except JdkNotFound as e:
+            logger.warning(f"JDK detection failed: {e}")
+            print(f"  ⚠️ {e}")
     print(SEPARATOR)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -203,6 +218,7 @@ def execute_task_graph(
                     task_recipe=task_recipe_path,
                     lock=lock,
                     verification_steps=verification_steps,
+                    verify_env=verify_env,
                     quiet=quiet,
                 )
                 futures[future] = tid
@@ -251,6 +267,7 @@ def _execute_single_task(
     task_recipe: str,
     lock: threading.Lock,
     verification_steps: list[tuple[str, list[str]]] | None = None,
+    verify_env: dict[str, str] | None = None,
     quiet: bool = True,
 ) -> str:
     """执行单个原子任务（在 worker 线程中运行）。
@@ -259,6 +276,7 @@ def _execute_single_task(
     不锁定：goose 子进程执行 + 验证步骤（主要耗时部分）。
 
     verification_steps: [(label, [cmd, ...]), ...] 如 [("compile", ["mvn compile"]), ("test", ["mvn test"])]
+    verify_env: 注入到验证子进程的环境变量（如 JAVA_HOME）。
     quiet: True 时 goose 传 -q，隐藏文件扫描噪音。
     """
 
@@ -371,10 +389,24 @@ def _execute_single_task(
                 logger.warning(f"Task {tid} completed but missing in sandbox: {missing}")
                 if sandbox:
                     logger.warning(f"Sandbox preserved at: {sandbox_path}")
-                state_mgr.mark_completed(tid, "", task.output_files)
+                state_mgr.mark_failed(tid, f"Goose completed but missing output files: {missing}")
                 state_mgr.save()
-                print(f"  ⚠️ 完成 ({mins}m{secs}s) — 但缺少文件: {missing}")
-                return _TASK_OK
+                print(f"  ❌ 失败 ({mins}m{secs}s) — 缺少文件: {missing}")
+                tr = state_mgr.tasks[tid]
+                action = handle_task_error(
+                    tid, task.name, tr["retries"],
+                    task.retry_limit, ai_dev_dir
+                )
+                if action == TaskAction.RETRY_TASK:
+                    state_mgr.tasks[tid]["status"] = STATUS_PENDING
+                    state_mgr.tasks[tid]["started_at"] = None
+                    state_mgr.save()
+                    return _TASK_RETRY
+                elif action == TaskAction.ABORT_GRAPH:
+                    return _TASK_ABORT
+                elif action == TaskAction.NOTE_EXIT:
+                    return _TASK_NOTE_EXIT
+                return _TASK_SKIP
             else:
                 # 检测非预期修改
                 if sandbox:
@@ -389,7 +421,7 @@ def _execute_single_task(
                 if verification_steps:
                     print(f"  🔍 验证中（{' → '.join(l for l, _ in verification_steps)}）...")
                     for label, commands in verification_steps:
-                        passed, output = _run_verification_step(sandbox_path, label, commands)
+                        passed, output = _run_verification_step(sandbox_path, label, commands, env=verify_env)
                         if not passed:
                             print(f"  ❌ 验证失败: {label}")
                             # Print tail of output for diagnosis
@@ -623,9 +655,13 @@ def _get_verification_steps(profile: dict) -> list[tuple[str, list[str]]]:
 
 
 def _run_verification_step(
-    sandbox_path: Path, label: str, commands: list[str], timeout: int = VERIFY_TIMEOUT
+    sandbox_path: Path, label: str, commands: list[str],
+    timeout: int = VERIFY_TIMEOUT, env: dict[str, str] | None = None,
 ) -> tuple[bool, str]:
-    """在沙箱内执行一组验证命令。返回 (passed, output_summary)。"""
+    """在沙箱内执行一组验证命令。env 注入自定义环境变量（如 JAVA_HOME）。"""
+    merged_env = None
+    if env:
+        merged_env = {**os.environ, **env}
     for cmd in commands:
         try:
             proc = subprocess.run(
@@ -635,6 +671,7 @@ def _run_verification_step(
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                env=merged_env,
             )
             if proc.returncode != 0:
                 tail = proc.stderr.strip() or proc.stdout.strip()

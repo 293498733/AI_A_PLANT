@@ -220,6 +220,10 @@ class TestExecuteSingleTask:
         # Output file that doesn't exist
         task = self._make_task(output_files=["nonexistent.py"])
 
+        # Mock handle_task_error to return RETRY so we get TASK_RETRY
+        from pipeline.error_handler import TaskAction
+        mocker.patch("pipeline.task_graph.handle_task_error", return_value=TaskAction.RETRY_TASK)
+
         result = _execute_single_task(
             tid="t1", task=task,
             state_mgr=mocks["state_mgr"],
@@ -233,11 +237,14 @@ class TestExecuteSingleTask:
             lock=mocks["lock"],
         )
 
-        assert result == _TASK_OK  # still OK, just warns about missing
+        assert result == _TASK_RETRY  # now fails with retry when output files missing
+        mocks["state_mgr"].mark_failed.assert_called_once()
 
     def test_sandbox_disabled(self, mocker, tmp_path):
         mocks = self._make_mocks(mocker, tmp_path)
         task = self._make_task(sandbox_enabled=False)
+        # 创建产出文件以通过文件检查
+        (tmp_path / "out.py").write_text("# generated")
 
         result = _execute_single_task(
             tid="t1", task=task,
