@@ -103,7 +103,19 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
         raise FileNotFoundError(f"task graph config not found: {path}")
 
     with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        text = f.read()
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        logger.warning("tasks.yaml has YAML syntax errors, attempting auto-repair")
+        repaired = _repair_yaml(text)
+        try:
+            data = yaml.safe_load(repaired)
+            path.write_text(repaired, encoding="utf-8")
+            logger.info("tasks.yaml auto-repaired and saved")
+        except yaml.YAMLError as e:
+            logger.error(f"tasks.yaml repair failed, using empty task graph: {e}")
+            return TaskGraphConfig(tasks=[], total_estimated_turns=0)
 
     tasks = []
     task_ids: set[str] = set()
@@ -198,11 +210,42 @@ def load_profile(profile_path: Path) -> dict | None:
 
 
 def _repair_yaml(text: str) -> str:
-    """修复 goose 生成 profile.yml 时的常见 YAML 语法错误：未加引号的值。"""
+    """修复 goose 生成 YAML 时的常见语法错误：未加引号的值 + 块标量→引号。
+
+    策略：移除所有 YAML 块标量（| >），将其值用引号包裹。这比调试缩进更可靠。
+    """
     import re
     lines = text.splitlines()
     fixed = []
-    for line in lines:
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        # 检测块标量：key: | 或 key: >
+        m_block = re.match(r'^(\s+)([\w-]+)\s*:\s*[|>]\s*$', line)
+        if m_block:
+            indent = len(m_block.group(1))
+            key_indent = indent
+            # 收集后续缩进更深的内容行作为值
+            value_lines = []
+            i += 1
+            while i < len(lines):
+                stripped = lines[i].rstrip()
+                # 空行或注释跳过
+                if not stripped or stripped.lstrip().startswith('#'):
+                    i += 1
+                    continue
+                # 如果行缩进 <= 键缩进，说明块标量内容结束
+                leading_spaces = len(lines[i]) - len(lines[i].lstrip())
+                if leading_spaces <= key_indent:
+                    break
+                value_lines.append(stripped)
+                i += 1
+            # 将多行值合并为引号字符串
+            escaped = '\\n'.join(value_lines).replace('"', '\\"')
+            fixed.append(f'{m_block.group(1)}{m_block.group(2)}: "{escaped}"')
+            continue
+
+        # 修复未加引号的值（含 YAML 特殊字符）
         m = re.match(r'^(\s+)([\w-]+):\s+(.+)', line)
         if m and '\"' not in m.group(3).lstrip() and '\'' not in m.group(3).lstrip():
             val = m.group(3)
@@ -210,6 +253,7 @@ def _repair_yaml(text: str) -> str:
                 val = val.replace('\"', '\\"')
                 line = f'{m.group(1)}{m.group(2)}: "{val}"'
         fixed.append(line)
+        i += 1
     return '\n'.join(fixed)
 
 
