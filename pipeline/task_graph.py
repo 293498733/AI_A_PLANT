@@ -43,8 +43,11 @@ def execute_task_graph(
     tasks_file: Path,
     profile_path: Path,
     task_recipe: str = "recipes/steps/task-template.yaml",
+    quiet: bool = True,
 ) -> tuple[bool, dict]:
     """执行任务图。
+
+    quiet=True 时 goose 子进程传 -q，隐藏文件扫描噪音，仅显示模型回复。
 
     Returns:
         (success, results_dict) — success=True 表示所有任务完成或跳过
@@ -200,6 +203,7 @@ def execute_task_graph(
                     task_recipe=task_recipe_path,
                     lock=lock,
                     verification_steps=verification_steps,
+                    quiet=quiet,
                 )
                 futures[future] = tid
 
@@ -247,6 +251,7 @@ def _execute_single_task(
     task_recipe: str,
     lock: threading.Lock,
     verification_steps: list[tuple[str, list[str]]] | None = None,
+    quiet: bool = True,
 ) -> str:
     """执行单个原子任务（在 worker 线程中运行）。
 
@@ -254,6 +259,7 @@ def _execute_single_task(
     不锁定：goose 子进程执行 + 验证步骤（主要耗时部分）。
 
     verification_steps: [(label, [cmd, ...]), ...] 如 [("compile", ["mvn compile"]), ("test", ["mvn test"])]
+    quiet: True 时 goose 传 -q，隐藏文件扫描噪音。
     """
 
     # === Pre-execution (under lock) ===
@@ -307,6 +313,7 @@ def _execute_single_task(
             cwd=sandbox_path,
             timeout_minutes=task.timeout_minutes,
             on_timeout=_on_task_timeout,
+            quiet=quiet,
         )
     except Exception as e:
         logger.error(f"Task {tid}: run_task exception: {e}")

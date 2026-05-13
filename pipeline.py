@@ -142,6 +142,7 @@ def main():
     parser.add_argument("--from-stage", dest="from_stage", help="从指定阶段开始")
     parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际执行")
     parser.add_argument("--debug", action="store_true", help="调试模式")
+    parser.add_argument("--verbose", action="store_true", help="goose 全量输出（默认 -q 静默，仅显示模型回复）")
     parser.add_argument("--ci", action="store_true", help="CI 模式，跳过所有人工交互，自动使用默认选择")
     parser.add_argument("--version", action="version", version=f"ai-dev-flow v{__version__}")
     args = parser.parse_args()
@@ -331,6 +332,7 @@ def main():
                 profile_path=AD / "profile.yml",
                 task_recipe=expanded_params.get("task_recipe",
                     "recipes/steps/task-template.yaml"),
+                quiet=not args.verbose,
             )
 
             if success:
@@ -378,6 +380,7 @@ def main():
                     max_turns=stage.max_turns,
                     params=expanded_params,
                     cwd=P,
+                    quiet=not args.verbose,
                 )
 
                 print()
