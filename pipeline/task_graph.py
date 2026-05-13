@@ -1,16 +1,18 @@
 """任务图执行器 — 依赖拓扑排序 + 逐任务 fresh session 执行（沙箱隔离）。
 
 v3.3: 并发上限控制 — ThreadPoolExecutor + parallel_group 分组 + max_workers 背压。
+v3.4: 单任务验证闭环 — goose 产出后沙箱内编译+测试，全部通过才 sync。
 """
 
 import time
 import logging
+import subprocess
 import threading
 from pathlib import Path
 from itertools import groupby
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from pipeline.config import TaskGraphConfig, TaskConfig, load_task_graph
+from pipeline.config import TaskGraphConfig, TaskConfig, load_task_graph, load_profile
 from pipeline.task_state import (
     TaskStateManager, STATUS_PENDING, STATUS_COMPLETED,
     STATUS_FAILED, STATUS_SKIPPED,
@@ -98,6 +100,14 @@ def execute_task_graph(
     lock = threading.Lock()
     total = len(graph.tasks)
     task_recipe_path = str(Path(__file__).resolve().parent.parent / task_recipe)
+
+    # 加载 profile 并提取验证步骤
+    profile = load_profile(profile_path) or {}
+    verification_steps = _get_verification_steps(profile)
+    if verification_steps:
+        labels = [label for label, _ in verification_steps]
+        print(f"  验证闭环: {' → '.join(labels)}")
+    print(SEPARATOR)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         while True:
@@ -189,6 +199,7 @@ def execute_task_graph(
                     profile_path=profile_path,
                     task_recipe=task_recipe_path,
                     lock=lock,
+                    verification_steps=verification_steps,
                 )
                 futures[future] = tid
 
@@ -235,14 +246,14 @@ def _execute_single_task(
     profile_path: Path,
     task_recipe: str,
     lock: threading.Lock,
+    verification_steps: list[tuple[str, list[str]]] | None = None,
 ) -> str:
     """执行单个原子任务（在 worker 线程中运行）。
 
     锁范围：pre-execution（状态写入 + 沙箱创建）和 post-execution（状态更新 + git + snapshot）
-    不锁定：goose 子进程执行（主要耗时部分）。
+    不锁定：goose 子进程执行 + 验证步骤（主要耗时部分）。
 
-    Returns:
-        _TASK_OK / _TASK_RETRY / _TASK_SKIP / _TASK_ABORT / _TASK_NOTE_EXIT
+    verification_steps: [(label, [cmd, ...]), ...] 如 [("compile", ["mvn compile"]), ("test", ["mvn test"])]
     """
 
     # === Pre-execution (under lock) ===
@@ -351,6 +362,43 @@ def _execute_single_task(
                     if extra:
                         logger.warning(f"Task {tid} modified undeclared files: {extra}")
 
+                # === 验证闭环：沙箱内编译+测试（v3.4） ===
+                verify_failed = False
+                if verification_steps:
+                    print(f"  🔍 验证中（{' → '.join(l for l, _ in verification_steps)}）...")
+                    for label, commands in verification_steps:
+                        passed, output = _run_verification_step(sandbox_path, label, commands)
+                        if not passed:
+                            print(f"  ❌ 验证失败: {label}")
+                            # Print tail of output for diagnosis
+                            for line in output.splitlines()[-15:]:
+                                print(f"      {line}")
+                            verify_failed = True
+                            break
+                        else:
+                            print(f"  ✅ {label} 通过")
+                    if verify_failed:
+                        # 保留沙箱供排查
+                        if sandbox:
+                            logger.warning(f"Task {tid} verification failed, sandbox preserved at: {sandbox_path}")
+                        state_mgr.mark_failed(tid, f"Verification failed: {label}\n{output[-500:]}")
+                        state_mgr.save()
+                        tr = state_mgr.tasks[tid]
+                        action = handle_task_error(
+                            tid, task.name, tr["retries"],
+                            task.retry_limit, ai_dev_dir
+                        )
+                        if action == TaskAction.RETRY_TASK:
+                            state_mgr.tasks[tid]["status"] = STATUS_PENDING
+                            state_mgr.tasks[tid]["started_at"] = None
+                            state_mgr.save()
+                            return _TASK_RETRY
+                        elif action == TaskAction.ABORT_GRAPH:
+                            return _TASK_ABORT
+                        elif action == TaskAction.NOTE_EXIT:
+                            return _TASK_NOTE_EXIT
+                        return _TASK_SKIP
+
                 # 从沙箱同步产出文件到真实项目
                 if sandbox:
                     synced = sandbox.sync_outputs(task.output_files)
@@ -434,6 +482,62 @@ def _detect_residual_files(project_root: Path, task: TaskConfig) -> list[str]:
         if fp.exists():
             residual.append(f)
     return residual
+
+
+VERIFY_TIMEOUT = 600  # 每步验证超时（秒）
+
+
+def _get_verification_steps(profile: dict) -> list[tuple[str, list[str]]]:
+    """从 profile 提取验证步骤：编译 → 测试。
+
+    优先 compileOnly（快速编译检查），用 test 做单独测试。
+    若只有 build（含测试），则单步验证。
+    若 commands 段缺失，返回空列表（跳过验证，向后兼容）。
+    """
+    commands = profile.get("commands", {})
+    if not commands:
+        return []
+
+    steps: list[tuple[str, list[str]]] = []
+    has_compile_only = "compileOnly" in commands
+    has_build = "build" in commands
+    has_test = "test" in commands
+
+    if has_compile_only:
+        steps.append(("compile", commands["compileOnly"]))
+    elif has_build:
+        steps.append(("build", commands["build"]))
+
+    # 仅当编译和测试分开时才追加独立测试步骤
+    if has_test and has_compile_only:
+        steps.append(("test", commands["test"]))
+
+    return steps
+
+
+def _run_verification_step(
+    sandbox_path: Path, label: str, commands: list[str], timeout: int = VERIFY_TIMEOUT
+) -> tuple[bool, str]:
+    """在沙箱内执行一组验证命令。返回 (passed, output_summary)。"""
+    for cmd in commands:
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(sandbox_path),
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            if proc.returncode != 0:
+                tail = proc.stderr.strip() or proc.stdout.strip()
+                lines = tail.splitlines()
+                if len(lines) > 30:
+                    tail = "\n".join(lines[-30:])
+                return False, f"$ {cmd}\nexit {proc.returncode}\n{tail}"
+        except subprocess.TimeoutExpired:
+            return False, f"$ {cmd}\nTIMEOUT (>{timeout}s)"
+    return True, f"$ {commands[-1]}\nOK"
 
 
 def _detect_cycle(tasks: dict[str, TaskConfig]) -> list[str] | None:

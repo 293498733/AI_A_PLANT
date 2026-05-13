@@ -1,12 +1,12 @@
 # 开发状态追踪
 
-> 最后更新: 2026-05-13 | 当前版本: v3.3.0
+> 最后更新: 2026-05-13 | 当前版本: v3.4.0
 
 ## 模块状态
 
 | 模块 | 状态 | 版本 | 说明 |
 |------|------|------|------|
-| `pipeline/__init__.py` | ✅ | v3.3 | 版本号 3.3.0 |
+| `pipeline/__init__.py` | ✅ | v3.4 | 版本号 3.4.0 |
 | `pipeline/logger.py` | ✅ | 完成 | 结构化日志 |
 | `pipeline/state.py` | ✅ | v3.1 | 阶段/任务状态读写（原子写入） |
 | `pipeline/config.py` | ✅ | v3.3 | StageConfig + TaskConfig + TaskGraphConfig（max_workers） |
@@ -15,7 +15,7 @@
 | `pipeline/error_handler.py` | ✅ | v3.1 | 双层级错误处理 + CI 自动决策 |
 | `pipeline/task_state.py` | ✅ | v3.1 | TaskStateManager |
 | `pipeline/task_context.py` | ✅ | v3.1 | ContextAssembler |
-| `pipeline/task_graph.py` | ✅ | v3.3 | 任务图执行器 + 并发控制（ThreadPoolExecutor + parallel_group） |
+| `pipeline/task_graph.py` | ✅ | v3.4 | 任务图执行器 + 并发控制 + 验证闭环 |
 | `pipeline/git_ops.py` | ✅ | v3.2 | Git 自动提交 + commit_files() |
 | `pipeline/snapshot.py` | ✅ | 完成 | SnapshotManager |
 | `pipeline/semantic_summarizer.py` | ✅ | 完成 | 8 语言语义提取 |
@@ -25,7 +25,7 @@
 | `pipeline.py` | ✅ | v3.2 | CLI 入口 |
 | `pipeline.yaml` | ✅ | v3.1 | 12 阶段定义 |
 | Recipe 文件 (10) | ✅ | v3.1 | Phase 0-7 + task-template |
-| `tests/` (15 文件) | ✅ | v3.3 | 176 测试覆盖全模块 |
+| `tests/` (15 文件) | ✅ | v3.4 | 189 测试覆盖全模块 |
 | `.github/workflows/test.yml` | ✅ | 完成 | GitHub Actions CI |
 
 ## 已修复 Bug

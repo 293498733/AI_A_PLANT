@@ -1,8 +1,10 @@
+import subprocess
 import threading
 from pathlib import Path
 from pipeline.task_graph import (
     _detect_cycle, _module_bar, _detect_residual_files, _write_context_file,
-    _execute_single_task, _TASK_OK, _TASK_RETRY, _TASK_SKIP, _TASK_ABORT,
+    _execute_single_task, _get_verification_steps, _run_verification_step,
+    _TASK_OK, _TASK_RETRY, _TASK_SKIP, _TASK_ABORT,
 )
 from pipeline.config import TaskConfig
 
@@ -252,3 +254,174 @@ class TestExecuteSingleTask:
         assert result == _TASK_OK
         # SandboxManager.create should not be called when sandbox disabled
         mocks["mock_sandbox"].create.assert_not_called()
+
+    def test_verification_passed(self, mocker, tmp_path):
+        """验证步骤全部通过 → 任务成功。"""
+        mocks = self._make_mocks(mocker, tmp_path)
+        task = self._make_task()
+        (tmp_path / "out.py").write_text("# generated")
+
+        # Mock _run_verification_step to pass
+        mocker.patch("pipeline.task_graph._run_verification_step", return_value=(True, "OK"))
+
+        result = _execute_single_task(
+            tid="t1", task=task,
+            state_mgr=mocks["state_mgr"],
+            context_asm=mocks["context_asm"],
+            knowledge_mgr=mocks["knowledge_mgr"],
+            snapshot_mgr=mocks["snapshot_mgr"],
+            git=mocks["git"], git_available=True,
+            project_root=tmp_path, ai_dev_dir=tmp_path,
+            profile_path=tmp_path / "profile.yml",
+            task_recipe="recipe.yaml",
+            lock=mocks["lock"],
+            verification_steps=[("compile", ["mvn compile"]), ("test", ["mvn test"])],
+        )
+
+        assert result == _TASK_OK
+        mocks["state_mgr"].mark_completed.assert_called_once()
+
+    def test_verification_failed_with_retry(self, mocker, tmp_path):
+        """验证失败 → 任务标记失败 → 根据 error_handler 决定重试。"""
+        mocks = self._make_mocks(mocker, tmp_path)
+        task = self._make_task()
+        (tmp_path / "out.py").write_text("# generated")
+
+        # Mock _run_verification_step: compile passes, test fails
+        call_count = [0]
+        def _mock_verify(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return (True, "compile OK")
+            return (False, "test FAILED: 3 tests, 1 failure")
+
+        mocker.patch("pipeline.task_graph._run_verification_step", side_effect=_mock_verify)
+        from pipeline.error_handler import TaskAction
+        mocker.patch("pipeline.task_graph.handle_task_error", return_value=TaskAction.RETRY_TASK)
+
+        result = _execute_single_task(
+            tid="t1", task=task,
+            state_mgr=mocks["state_mgr"],
+            context_asm=mocks["context_asm"],
+            knowledge_mgr=mocks["knowledge_mgr"],
+            snapshot_mgr=mocks["snapshot_mgr"],
+            git=mocks["git"], git_available=True,
+            project_root=tmp_path, ai_dev_dir=tmp_path,
+            profile_path=tmp_path / "profile.yml",
+            task_recipe="recipe.yaml",
+            lock=mocks["lock"],
+            verification_steps=[("compile", ["mvn compile"]), ("test", ["mvn test"])],
+        )
+
+        assert result == _TASK_RETRY
+        mocks["state_mgr"].mark_failed.assert_called_once()
+        # Sandbox sync should NOT be called (verification failed)
+        mocks["mock_sandbox"].sync_outputs.assert_not_called()
+
+
+class TestGetVerificationSteps:
+    def test_full_commands(self):
+        profile = {
+            "commands": {
+                "compileOnly": ["mvn -DskipTests compile"],
+                "build": ["mvn clean package"],
+                "test": ["mvn test"],
+            }
+        }
+        steps = _get_verification_steps(profile)
+        assert len(steps) == 2
+        assert steps[0][0] == "compile"
+        assert steps[1][0] == "test"
+
+    def test_build_only(self):
+        profile = {
+            "commands": {
+                "build": ["mvn clean package"],
+            }
+        }
+        steps = _get_verification_steps(profile)
+        assert len(steps) == 1
+        assert steps[0][0] == "build"
+
+    def test_no_commands(self):
+        profile = {"profile": "java-spring"}
+        steps = _get_verification_steps(profile)
+        assert steps == []
+
+    def test_empty_profile(self):
+        assert _get_verification_steps({}) == []
+
+    def test_compile_only_no_test(self):
+        profile = {
+            "commands": {
+                "compileOnly": ["mvn -DskipTests compile"],
+            }
+        }
+        steps = _get_verification_steps(profile)
+        assert len(steps) == 1
+        assert steps[0][0] == "compile"
+
+    def test_build_with_test_no_compile_only(self):
+        """有 build + test 但无 compileOnly → 只用 build（已含测试）。"""
+        profile = {
+            "commands": {
+                "build": ["mvn clean package"],
+                "test": ["mvn test"],
+            }
+        }
+        steps = _get_verification_steps(profile)
+        assert len(steps) == 1
+        assert steps[0][0] == "build"
+
+
+class TestRunVerificationStep:
+    def test_success(self, mocker, tmp_path):
+        mock_proc = mocker.MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = ""
+        mock_proc.stderr = ""
+        mocker.patch("subprocess.run", return_value=mock_proc)
+
+        passed, output = _run_verification_step(tmp_path, "compile", ["mvn compile"])
+        assert passed is True
+        assert "OK" in output
+
+    def test_failure(self, mocker, tmp_path):
+        mock_proc = mocker.MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.stderr = "error: compilation failed\nBUILD FAILURE"
+        mock_proc.stdout = ""
+        mocker.patch("subprocess.run", return_value=mock_proc)
+
+        passed, output = _run_verification_step(tmp_path, "compile", ["mvn compile"])
+        assert passed is False
+        assert "BUILD FAILURE" in output
+        assert "exit 1" in output
+
+    def test_timeout(self, mocker, tmp_path):
+        mocker.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 1))
+
+        passed, output = _run_verification_step(tmp_path, "compile", ["mvn compile"], timeout=1)
+        assert passed is False
+        assert "TIMEOUT" in output
+
+    def test_multiple_commands_all_pass(self, mocker, tmp_path):
+        mock_proc = mocker.MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = ""
+        mock_proc.stderr = ""
+        mocker.patch("subprocess.run", return_value=mock_proc)
+
+        passed, output = _run_verification_step(tmp_path, "build", ["cmd1", "cmd2"])
+        assert passed is True
+
+    def test_first_command_fails_stops_early(self, mocker, tmp_path):
+        mock_proc = mocker.MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.stderr = "fail"
+        mock_proc.stdout = ""
+        mock_run = mocker.patch("subprocess.run", return_value=mock_proc)
+
+        passed, _ = _run_verification_step(tmp_path, "compile", ["cmd1", "cmd2"])
+        assert passed is False
+        assert mock_run.call_count == 1  # second command never runs
