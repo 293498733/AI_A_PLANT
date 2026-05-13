@@ -72,8 +72,8 @@
 ## 📋 计划实现（待排期）
 
 ### P1 — 执行能力增强
+- [ ] **并发上限控制**：线程池限制同时执行的 goose 任务数（如 max_workers=3），同一 parallel_group 内可并行，超过上限的任务排队等空闲；让拆分粒度可以更细（10-20 turn），靠背压避免单任务触达 goose max actions 上限
 - [ ] **goose 输出静默**：executor 默认传 `-q` 给 goose，仅显示模型回复，隐藏文件扫描噪音；加 `--verbose` flag 恢复全量输出
-- [ ] **多任务并行**：independent tasks 在 parallel_group 内并行执行
 - [ ] **子管线执行器**：大模块内部走 mini-pipeline（方案→编码→测试→审查）
 
 ### P2 — 质量体系
