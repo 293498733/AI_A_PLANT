@@ -39,10 +39,23 @@ def check_goose() -> str:
 
 
 def build_params(params: dict[str, str]) -> list[str]:
+    """构建 goose --params 参数列表。值含 YAML 特殊字符时自动加引号。"""
     result = []
     for key, value in params.items():
+        # goose 可能将 --params key=value 解析为 YAML，
+        # 若 value 含 : # { } [ ] , & * ? | > < ! % @ ` 等字符则加引号
+        if _needs_yaml_quoting(value):
+            value = f'"{value}"'
         result.extend(["--params", f"{key}={value}"])
     return result
+
+
+def _needs_yaml_quoting(value: str) -> bool:
+    """检查字符串是否包含需要 YAML 引号的特殊字符。"""
+    for ch in value:
+        if ch in ':#{}[]&*?!|>%@`,' or ch == '"':
+            return True
+    return False
 
 
 def _build_args(recipe: str, max_turns: int, params: dict[str, str], quiet: bool = False) -> list[str]:
