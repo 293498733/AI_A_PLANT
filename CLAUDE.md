@@ -8,7 +8,7 @@
 
 ## 项目定位
 
-**AI Dev Flow** — AI 驱动的全流程软件开发管线，当前版本 **v3.4.0**。
+**AI Dev Flow** — AI 驱动的全流程软件开发管线，当前版本 **v3.5.0**。
 
 - **入口**: `python pipeline.py --project <目标项目路径>`
 - **技术栈**: Python 3.9+（编排）+ Goose CLI（AI 引擎）+ YAML Recipe（阶段/任务定义）

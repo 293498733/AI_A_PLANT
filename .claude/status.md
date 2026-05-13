@@ -1,21 +1,21 @@
 # 开发状态追踪
 
-> 最后更新: 2026-05-13 | 当前版本: v3.4.0
+> 最后更新: 2026-05-13 | 当前版本: v3.5.0
 
 ## 模块状态
 
 | 模块 | 状态 | 版本 | 说明 |
 |------|------|------|------|
-| `pipeline/__init__.py` | ✅ | v3.4 | 版本号 3.4.0 |
+| `pipeline/__init__.py` | ✅ | v3.5 | 版本号 3.5.0 |
 | `pipeline/logger.py` | ✅ | 完成 | 结构化日志 |
 | `pipeline/state.py` | ✅ | v3.1 | 阶段/任务状态读写（原子写入） |
 | `pipeline/config.py` | ✅ | v3.3 | StageConfig + TaskConfig + TaskGraphConfig（max_workers） |
-| `pipeline/executor.py` | ✅ | v3.2 | Popen + 看门狗 + 线程化 I/O + 心跳 |
+| `pipeline/executor.py` | ✅ | v3.5 | Popen + 看门狗 + 线程化 I/O + 心跳 + quiet 输出 |
 | `pipeline/checkpoint.py` | ⚠️ 待废弃 | v3.1 | 人工确认（v4.0 废弃） |
 | `pipeline/error_handler.py` | ✅ | v3.1 | 双层级错误处理 + CI 自动决策 |
 | `pipeline/task_state.py` | ✅ | v3.1 | TaskStateManager |
 | `pipeline/task_context.py` | ✅ | v3.1 | ContextAssembler |
-| `pipeline/task_graph.py` | ✅ | v3.4 | 任务图执行器 + 并发控制 + 验证闭环 |
+| `pipeline/task_graph.py` | ✅ | v3.5 | 任务图执行器 + 并发控制 + 验证闭环 + 静默输出 |
 | `pipeline/git_ops.py` | ✅ | v3.2 | Git 自动提交 + commit_files() |
 | `pipeline/snapshot.py` | ✅ | 完成 | SnapshotManager |
 | `pipeline/semantic_summarizer.py` | ✅ | 完成 | 8 语言语义提取 |

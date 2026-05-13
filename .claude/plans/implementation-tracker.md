@@ -43,6 +43,12 @@
 - 向后兼容：profile 无 commands 段时跳过验证
 - 189 个测试（新增 13 个：6 个验证步骤 + 5 个 subprocess 执行 + 2 个集成测试）
 
+### v3.5.0 — goose 输出静默 (2026-05-13)
+- `executor._build_args(quiet=True)` → 追加 `-q` flag
+- `run_stage(quiet=True)` / `run_task(quiet=True)` 默认静默
+- `pipeline.py --verbose` 恢复全量输出
+- 全链路穿透：pipeline.py → execute_task_graph → _execute_single_task → run_task
+
 ---
 
 ## ⏸️ 搁置 — v4.0 升级改造
@@ -90,7 +96,7 @@
 ### P1 — 执行能力增强
 - [x] **并发上限控制**（v3.3.0）：线程池限制同时执行的 goose 任务数（max_workers=3），同一 parallel_group 内可并行，超过上限的任务排队等空闲；让拆分粒度可以更细（10-20 turn），靠背压避免单任务触达 goose max actions 上限
 - [x] **单任务验证闭环**（v3.4.0）：沙箱内 goose 完成后 → 编译验证 → 测试验证 → 全部通过才 sync 回真实项目。编译/测试命令从 profile.yml commands 取，任一失败保留沙箱供排查，即时反馈不传染后续任务
-- [ ] **goose 输出静默**：executor 默认传 `-q` 给 goose，仅显示模型回复，隐藏文件扫描噪音；加 `--verbose` flag 恢复全量输出
+- [x] **goose 输出静默**（v3.5.0）：executor 默认传 `-q` 给 goose，仅显示模型回复，隐藏文件扫描噪音；加 `--verbose` flag 恢复全量输出
 - [ ] **子管线执行器**：大模块内部走 mini-pipeline（方案→编码→测试→审查）
 
 ### P2 — 质量体系

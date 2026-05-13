@@ -44,12 +44,14 @@ def build_params(params: dict[str, str]) -> list[str]:
     return result
 
 
-def _build_args(recipe: str, max_turns: int, params: dict[str, str]) -> list[str]:
+def _build_args(recipe: str, max_turns: int, params: dict[str, str], quiet: bool = False) -> list[str]:
     args = [
         "goose", "run",
         "--recipe", recipe,
         "--max-turns", str(max_turns),
     ]
+    if quiet:
+        args.append("-q")
     args.extend(build_params(params))
     return args
 
@@ -215,15 +217,18 @@ def run_stage(
     params: dict[str, str],
     cwd: Path | None = None,
     timeout_minutes: int | None = None,
+    quiet: bool = True,
 ) -> subprocess.CompletedProcess:
     """执行 goose recipe 阶段。
 
     timeout_minutes=None 时无超时限制（阶段级执行），>0 时启用心跳看门狗。
+    quiet=True 时传 -q 给 goose，隐藏文件扫描噪音，仅显示模型回复。
     """
     recipe_path = Path(recipe)
-    args = _build_args(str(recipe_path), max_turns, params)
+    args = _build_args(str(recipe_path), max_turns, params, quiet=quiet)
 
-    logger.info(f"goose run --recipe {recipe_path.name} --max-turns {max_turns}")
+    logger.info(f"goose run --recipe {recipe_path.name} --max-turns {max_turns}" +
+                (" -q" if quiet else ""))
     logger.debug(f"stage params: {params}")
 
     timeout_secs = (timeout_minutes * 60) if timeout_minutes else None
@@ -237,15 +242,18 @@ def run_task(
     cwd: Path,
     timeout_minutes: int = 15,
     on_timeout=None,
+    quiet: bool = True,
 ) -> subprocess.CompletedProcess:
     """执行单个任务。与 run_stage 相同流程，但始终启用心跳看门狗超时控制。
 
     on_timeout 在进程被看门狗终止后调用（用于沙箱清理等）。
+    quiet=True 时传 -q 给 goose，隐藏文件扫描噪音，仅显示模型回复。
     """
     recipe_path = Path(recipe)
-    args = _build_args(str(recipe_path), max_turns, params)
+    args = _build_args(str(recipe_path), max_turns, params, quiet=quiet)
 
-    logger.info(f"task: goose run --recipe {recipe_path.name} --max-turns {max_turns}")
+    logger.info(f"task: goose run --recipe {recipe_path.name} --max-turns {max_turns}" +
+                (" -q" if quiet else ""))
     logger.debug(f"task params: {params}")
 
     return _run_with_watchdog(args, cwd, timeout_minutes * 60, on_timeout=on_timeout)
