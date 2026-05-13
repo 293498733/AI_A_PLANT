@@ -40,6 +40,7 @@ class TaskConfig:
     parallel_group: str | None = None
     retry_limit: int = 2
     timeout_minutes: int = 15
+    sandbox_enabled: bool = True  # 任务是否在 git worktree 沙箱中执行
 
 
 @dataclass
@@ -120,6 +121,7 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
             parallel_group=item.get("parallel_group"),
             retry_limit=item.get("retry_limit", 2),
             timeout_minutes=item.get("timeout_minutes", 15),
+            sandbox_enabled=item.get("sandbox_enabled", True),
         ))
 
     return TaskGraphConfig(
