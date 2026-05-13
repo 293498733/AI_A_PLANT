@@ -257,3 +257,94 @@ def run_task(
     logger.debug(f"task params: {params}")
 
     return _run_with_watchdog(args, cwd, timeout_minutes * 60, on_timeout=on_timeout)
+
+
+class JdkNotFound(Exception):
+    """未找到匹配版本的 JDK。"""
+    def __init__(self, required: int, searched: list[str]):
+        self.required = required
+        self.searched = searched
+        msg = (
+            f"未找到 JDK {required}。已搜索:\n" +
+            "\n".join(f"  - {p}" for p in searched) +
+            f"\n请安装 JDK {required} 或设置 JAVA_HOME 环境变量。"
+        )
+        super().__init__(msg)
+
+
+def detect_jdk(required_version: int = 17) -> str:
+    """扫描系统找到匹配主版本的 JDK，返回 JAVA_HOME 路径。
+
+    搜索顺序：D 盘 Azul Zulu → common JDK 路径 → PATH 中的 javac。
+    找不到则抛出 JdkNotFound。
+    """
+    search_roots = [
+        # D 盘常见路径
+        Path("D:/"),
+        # 系统盘常见路径
+        Path("C:/Program Files/Eclipse Adoptium"),
+        Path("C:/Program Files/Java"),
+    ]
+
+    javac_paths: list[Path] = []
+
+    # 1. 扫描已知安装目录
+    for root in search_roots:
+        if not root.exists():
+            continue
+        if root.name == "D:/" or root == Path("D:/"):
+            # 扫描 D 盘根目录下的 JDK 目录
+            for d in root.iterdir():
+                if d.is_dir() and ("jdk" in d.name.lower() or "zulu" in d.name.lower()):
+                    javac = d / "bin" / "javac.exe"
+                    if javac.exists():
+                        javac_paths.append(javac)
+        else:
+            for d in root.glob("jdk*"):
+                javac = d / "bin" / "javac.exe"
+                if javac.exists():
+                    javac_paths.append(javac)
+            for d in root.glob("*"):
+                if d.is_dir():
+                    javac = d / "bin" / "javac.exe"
+                    if javac.exists():
+                        javac_paths.append(javac)
+
+    # 2. PATH 中的 javac
+    import shutil as _shutil
+    path_javac = _shutil.which("javac")
+    if path_javac:
+        javac_paths.append(Path(path_javac))
+
+    # 3. 逐个检查版本
+    seen = set()
+    for javac in javac_paths:
+        javac = javac.resolve()
+        key = str(javac)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            proc = subprocess.run(
+                [str(javac), "-version"],
+                capture_output=True, text=True, timeout=10,
+            )
+            output = proc.stdout + proc.stderr
+            version_str = _parse_javac_version(output)
+            if version_str and version_str[0] == required_version:
+                java_home = str(javac.parent.parent)
+                logger.info(f"JDK {required_version} detected: {java_home} (v{'.'.join(map(str, version_str))})")
+                return java_home
+        except Exception:
+            continue
+
+    raise JdkNotFound(required_version, [str(p) for p in javac_paths])
+
+
+def _parse_javac_version(output: str) -> tuple[int, ...] | None:
+    """从 javac -version 输出中提取版本号。如 'javac 17.0.13' → (17, 0, 13)。"""
+    import re
+    m = re.search(r'(\d+)\.(\d+)(?:\.(\d+))?', output)
+    if m:
+        return tuple(int(x) for x in m.groups() if x is not None)
+    return None
