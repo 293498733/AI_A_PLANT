@@ -1,4 +1,4 @@
-"""goose CLI 调用封装 — 实时输出、心跳、日志捕获。"""
+"""goose CLI 调用封装 — 实时输出、看门狗超时、日志捕获。"""
 
 import sys
 import time
@@ -8,9 +8,11 @@ import threading
 import subprocess
 from pathlib import Path
 
+from pipeline.watchdog import ProcessWatchdog
+
 logger = logging.getLogger("ai-dev-flow")
 
-HEARTBEAT_INTERVAL = 60  # 无输出超过此秒数则打印心跳
+HEARTBEAT_INTERVAL = 60
 
 
 class GooseError(Exception):
@@ -42,92 +44,20 @@ def build_params(params: dict[str, str]) -> list[str]:
     return result
 
 
-def run_stage(
-    recipe: str,
-    max_turns: int,
-    params: dict[str, str],
-    cwd: Path | None = None,
-) -> subprocess.CompletedProcess:
-    """执行 goose recipe，实时输出到终端并捕获到日志。"""
-
-    recipe_name = Path(recipe).name
+def _build_args(recipe: str, max_turns: int, params: dict[str, str]) -> list[str]:
     args = [
         "goose", "run",
         "--recipe", recipe,
         "--max-turns", str(max_turns),
     ]
     args.extend(build_params(params))
-
-    logger.info(f"goose run --recipe {recipe_name} --max-turns {max_turns}")
-    logger.debug(f"params: {params}")
-
-    proc = subprocess.Popen(
-        args,
-        cwd=str(cwd) if cwd else None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-
-    stderr_lines: list[str] = []
-    last_output = time.time()
-
-    def _read_stderr():
-        for line in proc.stderr:
-            stripped = line.rstrip()
-            if stripped:
-                stderr_lines.append(stripped)
-                logger.warning(f"[goose] {stripped}")
-
-    stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
-    stderr_thread.start()
-
-    # 逐行读取 stdout，实时输出 + 写日志，附加心跳
-    for raw_line in proc.stdout:
-        last_output = time.time()
-        line = raw_line.rstrip()
-        if line:
-            # 简洁输出到终端（goose 自身已有丰富输出，直接透传）
-            print(line, flush=True)
-            logger.debug(f"[goose] {line}")
-
-    proc.wait()
-    stderr_thread.join(timeout=5)
-
-    if proc.returncode != 0:
-        logger.error(f"goose exited with code {proc.returncode}")
-
-    return subprocess.CompletedProcess(
-        args=args,
-        returncode=proc.returncode,
-        stdout="",
-        stderr="\n".join(stderr_lines),
-    )
+    return args
 
 
-def run_task(
-    recipe: str,
-    max_turns: int,
-    params: dict[str, str],
-    cwd: Path,
-    timeout_minutes: int = 15,
-) -> subprocess.CompletedProcess:
-    """执行单个任务。与 run_stage 相同流程，但附加超时控制。"""
-    recipe_name = Path(recipe).name
-    args = [
-        "goose", "run",
-        "--recipe", recipe,
-        "--max-turns", str(max_turns),
-    ]
-    args.extend(build_params(params))
-
-    logger.info(f"task: goose run --recipe {recipe_name} --max-turns {max_turns}")
-    logger.debug(f"task params: {params}")
-
+def _spawn(args: list[str], cwd: Path) -> subprocess.Popen:
+    """启动 goose 子进程，捕获 stdout/stderr 管道。"""
     try:
-        proc = subprocess.Popen(
+        return subprocess.Popen(
             args,
             cwd=str(cwd),
             stdout=subprocess.PIPE,
@@ -139,7 +69,70 @@ def run_task(
     except FileNotFoundError:
         raise GooseNotFound("goose CLI not found in PATH")
 
+
+def _probe_process(pid: int) -> str:
+    """查询进程状态用于诊断。返回简短描述字符串。
+
+    用 tasklist /V 获取 Status (Running/Not Responding) 和 CPU Time，
+    辅助判断是 API I/O 阻塞还是 CPU 死循环。
+    """
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/V", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=5,
+        )
+        line = result.stdout.strip()
+        if not line or str(pid) not in line:
+            return "state=exited"
+        parts = [p.strip().strip('"') for p in line.split(",")]
+        if len(parts) < 8:
+            return "state=parse_error"
+        # parts: 0=Name, 1=PID, 2=Session, 3=Session#, 4=Mem, 5=Status, 6=User, 7=CPU_Time
+        status = parts[5]
+        mem = parts[4]
+        cpu_time = parts[7] if len(parts) > 7 else "N/A"
+        classification = _classify_state(status, cpu_time)
+        return f"state={classification} status={status} mem={mem} cpu_time={cpu_time}"
+    except Exception:
+        return "state=unknown"
+
+
+def _classify_state(status: str, cpu_time: str) -> str:
+    """基于进程状态和 CPU 时间推断卡死原因。"""
+    if status == "Not Responding":
+        return "IO_wait(API_hang?)"
+    if cpu_time and cpu_time != "0:00:00":
+        return "CPU_busy(loop?)"
+    return "idle"
+
+
+def _run_with_watchdog(
+    args: list[str],
+    cwd: Path,
+    timeout_seconds: int | None,
+    on_timeout=None,
+) -> subprocess.CompletedProcess:
+    """核心执行逻辑：线程化 I/O + 可选的看门狗超时控制。
+
+    - stdout 读取在 daemon 线程中执行，实时打印到终端
+    - stderr 读取在 daemon 线程中执行，捕获到日志
+    - 主线程等待进程退出，看门狗在超时后强制终止进程树
+    """
+
+    proc = _spawn(args, cwd)
+
     stderr_lines: list[str] = []
+    stdout_lines: list[str] = []
+    heartbeat = {"last": time.time()}
+
+    def _read_stdout():
+        for raw_line in proc.stdout:
+            line = raw_line.rstrip()
+            if line:
+                stdout_lines.append(line)
+                print(line, flush=True)
+                logger.debug(f"[goose] {line}")
+                heartbeat["last"] = time.time()
 
     def _read_stderr():
         for line in proc.stderr:
@@ -147,29 +140,63 @@ def run_task(
             if stripped:
                 stderr_lines.append(stripped)
                 logger.warning(f"[goose] {stripped}")
+                heartbeat["last"] = time.time()
 
+    stdout_thread = threading.Thread(target=_read_stdout, daemon=True)
     stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+    stdout_thread.start()
     stderr_thread.start()
 
-    for raw_line in proc.stdout:
-        line = raw_line.rstrip()
-        if line:
-            print(line, flush=True)
-            logger.debug(f"[goose] {line}")
+    # 看门狗（可选）
+    watchdog = None
+    if timeout_seconds and timeout_seconds > 0:
+        watchdog = ProcessWatchdog(proc.pid, timeout_seconds, on_timeout=on_timeout)
+        watchdog.start()
 
-    try:
-        proc.wait(timeout=timeout_minutes * 60)
-    except subprocess.TimeoutExpired:
-        logger.error(f"Task timed out after {timeout_minutes} minutes")
-        proc.kill()
+    # 心跳日志（含进程状态诊断）
+    def _heartbeat_loop():
+        while proc.poll() is None:
+            elapsed = time.time() - heartbeat["last"]
+            if elapsed > HEARTBEAT_INTERVAL:
+                info = _probe_process(proc.pid)
+                logger.warning(
+                    f"Goose has produced no output for {int(elapsed)}s (pid={proc.pid}, {info})"
+                )
+            time.sleep(min(HEARTBEAT_INTERVAL, 30))
+
+    heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+    heartbeat_thread.start()
+
+    # 主线程等待进程退出（有超时，防止 taskkill 失败导致永久卡死）
+    if timeout_seconds:
+        try:
+            proc.wait(timeout=timeout_seconds + 30)
+        except subprocess.TimeoutExpired:
+            logger.critical(f"Process {proc.pid} survived watchdog, force killing")
+            proc.kill()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                logger.critical(f"Process {proc.pid} UNKILLABLE")
+    else:
         proc.wait()
-        stderr_thread.join(timeout=5)
+
+    # 看门狗取消
+    if watchdog:
+        watchdog.cancel()
+
+    # 等待 I/O 线程结束
+    stdout_thread.join(timeout=5)
+    stderr_thread.join(timeout=5)
+
+    # 收集结果
+    stderr_text = "\n".join(stderr_lines)
+
+    if watchdog and watchdog.triggered:
         return subprocess.CompletedProcess(
             args=args, returncode=-1,
-            stdout="", stderr=f"Timeout after {timeout_minutes} minutes"
+            stdout="", stderr=f"Process killed by watchdog after {timeout_seconds}s"
         )
-
-    stderr_thread.join(timeout=5)
 
     if proc.returncode != 0:
         logger.error(f"goose exited with code {proc.returncode}")
@@ -178,5 +205,47 @@ def run_task(
         args=args,
         returncode=proc.returncode,
         stdout="",
-        stderr="\n".join(stderr_lines),
+        stderr=stderr_text,
     )
+
+
+def run_stage(
+    recipe: str,
+    max_turns: int,
+    params: dict[str, str],
+    cwd: Path | None = None,
+    timeout_minutes: int | None = None,
+) -> subprocess.CompletedProcess:
+    """执行 goose recipe 阶段。
+
+    timeout_minutes=None 时无超时限制（阶段级执行），>0 时启用心跳看门狗。
+    """
+    recipe_path = Path(recipe)
+    args = _build_args(str(recipe_path), max_turns, params)
+
+    logger.info(f"goose run --recipe {recipe_path.name} --max-turns {max_turns}")
+    logger.debug(f"stage params: {params}")
+
+    timeout_secs = (timeout_minutes * 60) if timeout_minutes else None
+    return _run_with_watchdog(args, cwd or Path.cwd(), timeout_secs)
+
+
+def run_task(
+    recipe: str,
+    max_turns: int,
+    params: dict[str, str],
+    cwd: Path,
+    timeout_minutes: int = 15,
+    on_timeout=None,
+) -> subprocess.CompletedProcess:
+    """执行单个任务。与 run_stage 相同流程，但始终启用心跳看门狗超时控制。
+
+    on_timeout 在进程被看门狗终止后调用（用于沙箱清理等）。
+    """
+    recipe_path = Path(recipe)
+    args = _build_args(str(recipe_path), max_turns, params)
+
+    logger.info(f"task: goose run --recipe {recipe_path.name} --max-turns {max_turns}")
+    logger.debug(f"task params: {params}")
+
+    return _run_with_watchdog(args, cwd, timeout_minutes * 60, on_timeout=on_timeout)
