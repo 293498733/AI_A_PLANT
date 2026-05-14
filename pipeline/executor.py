@@ -150,7 +150,6 @@ def _run_with_watchdog(
             line = raw_line.rstrip()
             if line:
                 stdout_lines.append(line)
-                print(line, flush=True)
                 logger.debug(f"[goose] {line}")
                 heartbeat["last"] = time.time()
 

@@ -31,7 +31,7 @@ def init(project_root: Path, debug: bool = False) -> logging.Logger:
     _LOGGER.addHandler(fh)
 
     ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(level)
+    ch.setLevel(logging.WARNING)
     ch.setFormatter(TerminalFormatter())
     _LOGGER.addHandler(ch)
 
