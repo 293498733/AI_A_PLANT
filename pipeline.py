@@ -311,6 +311,8 @@ def main():
     stage_times: list[tuple[str, float, str]] = []  # (name, elapsed_sec, status)
     pipeline_start = time.time()
 
+    _tasks_snapshot = ""  # 任务图执行后保护 tasks.yaml 不被后续阶段覆盖
+
     for i in range(start_idx, total):
         stage = pipeline.stages[i]
         progress = f"[{i+1}/{total}]"
@@ -380,6 +382,7 @@ def main():
                 mins, secs = divmod(int(elapsed), 60)
                 logger.info(f"任务图执行完成 ({mins}m{secs}s)")
                 stage_times.append((stage.name, elapsed, "✅"))
+                _tasks_snapshot = tasks_file.read_text(encoding="utf-8") if tasks_file.exists() else ""
                 continue
             else:
                 action = handle_error(AD)
@@ -391,9 +394,18 @@ def main():
                     write_stage(AD, stage.state_value)
                     elapsed = time.time() - task_start
                     stage_times.append((stage.name, elapsed, "⚠️ 跳过"))
+                    _tasks_snapshot = tasks_file.read_text(encoding="utf-8") if tasks_file.exists() else ""
                     continue
+                else:
+                    return
 
-        # AI 阶段
+        # AI 阶段 — 执行前恢复被覆盖的 tasks.yaml
+        if _tasks_snapshot and tasks_file.exists():
+            current = tasks_file.read_text(encoding="utf-8")
+            if current != _tasks_snapshot:
+                logger.warning("tasks.yaml was modified by a later phase, restoring original")
+                tasks_file.write_text(_tasks_snapshot, encoding="utf-8")
+
         expanded_params = expand_params(stage.params, P, AD, OUT)
         recipe_path = str(PROJECT_ROOT / stage.recipe)
         before_files = _snapshot_outputs(OUT)

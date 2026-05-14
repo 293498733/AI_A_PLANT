@@ -63,6 +63,20 @@ def execute_task_graph(
         logger.error(f"Circular dependency detected: {' -> '.join(cycle)}")
         return False, {}
 
+    # 检查 task_state.json 是否有上次运行残留的不一致条目
+    from pipeline.state import read_task_state as _read_ts
+    _existing = _read_ts(ai_dev_dir) or {}
+    _stale = [tid for tid in _existing if tid not in task_ids]
+    if _stale:
+        logger.warning(
+            f"task_state.json has {len(_stale)} stale entries from a previous run "
+            f"(tasks.yaml was likely overwritten). Clearing: {_stale}"
+        )
+        for tid in _stale:
+            del _existing[tid]
+        from pipeline.state import write_task_state as _write_ts
+        _write_ts(ai_dev_dir, _existing)
+
     # 初始化状态管理器
     dependencies = {tid: t.depends_on for tid, t in tasks.items()}
     modules = {tid: t.module for tid, t in tasks.items() if t.module}
