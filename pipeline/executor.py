@@ -1,7 +1,6 @@
 """goose CLI 调用封装 — 实时输出、看门狗超时、日志捕获。"""
 
 import os
-import sys
 import time
 import shutil
 import logging
@@ -51,7 +50,14 @@ def build_params(params: dict[str, str]) -> list[str]:
 
 
 def _needs_yaml_quoting(value: str) -> bool:
-    """检查字符串是否包含需要 YAML 引号的特殊字符。"""
+    """检查 YAML 标量值是否需要引号包裹。
+
+    跳过合法的 YAML flow sequence/mapping ([] 或 {})，其余含特殊字符的值需加引号。
+    """
+    import re as _re
+    stripped = value.strip()
+    if _re.match(r'^\[.*?\]$', stripped) or _re.match(r'^\{.*?\}$', stripped):
+        return False
     for ch in value:
         if ch in ':#{}[]&*?!|>%@`,' or ch == '"':
             return True

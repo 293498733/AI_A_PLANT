@@ -117,7 +117,7 @@ class SemanticSummarizer:
             if len(funcs) > 30:
                 parts.append(f"  ... and {len(funcs) - 30} more")
         if comments:
-            parts.append(f"\n### Key Comments")
+            parts.append("\n### Key Comments")
             parts.extend(comments[:15])
 
         return "\n".join(parts)
@@ -155,7 +155,7 @@ class SemanticSummarizer:
             parts.append(f"\n### Classes/Interfaces ({len(classes)})")
             parts.extend(classes)
         if fields:
-            parts.append(f"\n### Constants/Fields")
+            parts.append("\n### Constants/Fields")
             parts.extend(fields[:15])
         if methods:
             parts.append(f"\n### Methods ({len(methods)})")
@@ -163,7 +163,7 @@ class SemanticSummarizer:
             if len(methods) > 40:
                 parts.append(f"  ... and {len(methods) - 40} more")
         if comments:
-            parts.append(f"\n### Key Comments")
+            parts.append("\n### Key Comments")
             parts.extend(comments[:15])
 
         return "\n".join(parts)
@@ -207,7 +207,7 @@ class SemanticSummarizer:
             parts.append(f"\n### Functions ({len(funcs)})")
             parts.extend(funcs[:30])
         if comments:
-            parts.append(f"\n### Key Comments")
+            parts.append("\n### Key Comments")
             parts.extend(comments[:15])
 
         return "\n".join(parts)
@@ -258,15 +258,18 @@ class SemanticSummarizer:
             if "<script" in stripped:
                 in_script = True
             elif "</script>" in stripped:
-                in_script = False; sections.append(f"- `<script>` ({script_lines} lines)")
+                in_script = False
+                sections.append(f"- `<script>` ({script_lines} lines)")
             elif "<style" in stripped:
                 in_style = True
             elif "</style>" in stripped:
-                in_style = False; sections.append(f"- `<style>` ({style_lines} lines)")
+                in_style = False
+                sections.append(f"- `<style>` ({style_lines} lines)")
             elif "<template" in stripped:
                 in_template = True
             elif "</template>" in stripped:
-                in_template = False; sections.append(f"- `<template>` ({template_lines} lines)")
+                in_template = False
+                sections.append(f"- `<template>` ({template_lines} lines)")
             elif in_script:
                 script_lines += 1
             elif in_style:

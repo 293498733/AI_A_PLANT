@@ -14,7 +14,7 @@ from pathlib import Path
 from itertools import groupby
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from pipeline.config import TaskGraphConfig, TaskConfig, load_task_graph, load_profile, EmptyTaskGraphError
+from pipeline.config import TaskConfig, load_task_graph, load_profile
 from pipeline.task_state import (
     TaskStateManager, STATUS_PENDING, STATUS_COMPLETED,
     STATUS_FAILED, STATUS_SKIPPED,
@@ -93,7 +93,7 @@ def execute_task_graph(
         if tr["status"] == STATUS_FAILED and tr["retries"] >= tasks[tid].retry_limit:
             logger.warning(f"Task {tid} retries exhausted ({tr['retries']}/{tasks[tid].retry_limit}), auto-skip")
             state_mgr.tasks[tid]["status"] = STATUS_SKIPPED
-            state_mgr.tasks[tid]["notes"] = f"Auto-skipped: retries exhausted"
+            state_mgr.tasks[tid]["notes"] = "Auto-skipped: retries exhausted"
     state_mgr.save()
 
     snapshot_mgr = SnapshotManager(ai_dev_dir, project_root)
@@ -435,7 +435,7 @@ def _execute_single_task(
                 # === 验证闭环：沙箱内编译+测试（v3.4） ===
                 verify_failed = False
                 if verification_steps:
-                    print(f"  🔍 验证中（{' → '.join(l for l, _ in verification_steps)}）...")
+                    print(f"  🔍 验证中（{' → '.join(label for label, _ in verification_steps)}）...")
                     for label, commands in verification_steps:
                         passed, output = _run_verification_step(sandbox_path, label, commands, env=verify_env)
                         if not passed:

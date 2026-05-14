@@ -13,7 +13,6 @@
 import sys
 import os
 import time
-import shutil
 import argparse
 import subprocess
 from pathlib import Path
@@ -22,18 +21,18 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from pipeline import __version__
-from pipeline.logger import init as init_logger, get as get_logger
-from pipeline.config import load_pipeline, load_profile as load_project_profile, EmptyTaskGraphError
-from pipeline.state import (
+from pipeline import __version__  # noqa: E402
+from pipeline.logger import init as init_logger  # noqa: E402
+from pipeline.config import load_pipeline, load_profile as load_project_profile, EmptyTaskGraphError  # noqa: E402
+from pipeline.state import (  # noqa: E402
     read_stage, write_stage, clear_stage,
-    read_note, write_note, clear_note,
+    read_note, clear_note,
 )
-from pipeline.executor import check_goose, run_stage, GooseError, GooseNotFound, detect_jdk, JdkNotFound
-from pipeline.checkpoint import confirm, ask_boolean, set_ci_mode as set_checkpoint_ci
-from pipeline.error_handler import handle_error, Action, set_ci_mode as set_error_ci
-from pipeline.task_graph import execute_task_graph
-from pipeline.git_ops import GitOps
+from pipeline.executor import check_goose, run_stage, GooseNotFound, detect_jdk, JdkNotFound  # noqa: E402
+from pipeline.checkpoint import confirm, ask_boolean, set_ci_mode as set_checkpoint_ci  # noqa: E402
+from pipeline.error_handler import handle_error, Action, set_ci_mode as set_error_ci  # noqa: E402
+from pipeline.task_graph import execute_task_graph  # noqa: E402
+from pipeline.git_ops import GitOps  # noqa: E402
 
 SEPARATOR = "=" * 60
 
@@ -42,7 +41,7 @@ def setup_project(project_path: str, git_url: str = "", git_branch: str = "") ->
     p = Path(project_path).resolve()
     if not p.exists():
         if git_url:
-            print(f"项目目录不存在，从远程仓库 clone...")
+            print("项目目录不存在，从远程仓库 clone...")
             print(f"  {git_url} → {p}")
             p.parent.mkdir(parents=True, exist_ok=True)
             clone_cmd = ["git", "clone"]
@@ -56,7 +55,7 @@ def setup_project(project_path: str, git_url: str = "", git_branch: str = "") ->
             )
             if result.returncode != 0:
                 raise RuntimeError(f"git clone 失败: {result.stderr.strip()}")
-            print(f"  clone 完成")
+            print("  clone 完成")
         else:
             raise FileNotFoundError(f"项目目录不存在: {p}")
 
@@ -367,7 +366,7 @@ def main():
                 )
             except EmptyTaskGraphError as e:
                 logger.error(f"任务图加载失败: {e}")
-                print(f"\n  ❌ 任务图为空，无法执行。")
+                print("\n  ❌ 任务图为空，无法执行。")
                 print(f"  {e}")
                 action = handle_error(AD)
                 if action == Action.SKIP:

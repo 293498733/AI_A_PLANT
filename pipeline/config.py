@@ -1,9 +1,12 @@
 """配置加载 - pipeline.yaml 和 profile.yml 解析。"""
 
 import yaml
+import re
 import logging
 from pathlib import Path
 from dataclasses import dataclass, field
+
+from pipeline.executor import _needs_yaml_quoting
 
 logger = logging.getLogger("ai-dev-flow")
 
@@ -273,7 +276,6 @@ def _repair_yaml(text: str) -> str:
     3. 序列内联映射 - key: @value → 加引号
     4. 普通映射 key: @value → 加引号
     """
-    import re
     lines = text.splitlines()
     # Pass 1: 修复缺少 id: 前缀的 bare task ID
     lines = _fix_bare_task_ids(lines)
@@ -307,7 +309,7 @@ def _repair_yaml(text: str) -> str:
         m_seq = re.match(r'^(\s+)-\s+([\w-]+):\s+(.+)', line)
         if m_seq and '\"' not in m_seq.group(3).lstrip() and '\'' not in m_seq.group(3).lstrip():
             val = m_seq.group(3)
-            if _needs_quoting(val):
+            if _needs_yaml_quoting(val):
                 val = val.replace('\"', '\\"')
                 line = f'{m_seq.group(1)}- {m_seq.group(2)}: "{val}"'
 
@@ -315,7 +317,7 @@ def _repair_yaml(text: str) -> str:
         m = re.match(r'^(\s+)([\w-]+):\s+(.+)', line)
         if m and '\"' not in m.group(3).lstrip() and '\'' not in m.group(3).lstrip():
             val = m.group(3)
-            if _needs_quoting(val):
+            if _needs_yaml_quoting(val):
                 val = val.replace('\"', '\\"')
                 line = f'{m.group(1)}{m.group(2)}: "{val}"'
         fixed.append(line)
@@ -324,46 +326,19 @@ def _repair_yaml(text: str) -> str:
 
 
 def _looks_like_file_path(s: str) -> bool:
-    """判断字符串是否像文件路径（而非 AI 幻觉的中文描述）。
-
-    合法特征（满足任一即通过）：
-    - 包含路径分隔符 / 或 \\
-    - 有文件扩展名（.xx 后缀）
-    - 是已知的占位符路径模式
-
-    纯中文、无扩展名、无路径分隔符的字符串视为无效。
-    """
-    import re as _re
+    """判断字符串是否像文件路径（而非 AI 幻觉的中文描述）。"""
     s = s.strip()
     if not s:
         return False
-    # 路径分隔符
     if "/" in s or "\\" in s:
         return True
-    # 文件扩展名（.xxx，2-10 个字母数字）
-    if _re.search(r'\.[a-zA-Z0-9]{1,10}$', s):
+    if re.search(r'\.[a-zA-Z0-9]{1,10}$', s):
         return True
-    # 纯中文且无路径结构 → AI 幻觉
-    if _re.match(r'^[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef（）()，。、《》？?！!：:；;]+$', s):
+    if re.match(r'^[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef（）()，。、《》？?！!：:；;]+$', s):
         return False
-    # 兜底：如果有英文/数字混合，可能是合法文件名
-    if _re.search(r'[a-zA-Z0-9]', s):
+    if re.search(r'[a-zA-Z0-9]', s):
         return True
     return False
-
-
-def _needs_quoting(val: str) -> bool:
-    """检查 YAML 标量值是否需要引号包裹。
-
-    跳过合法的 YAML flow sequence/mapping ([] 或 {})，这些不加引号。
-    但包含 @ 等 YAML 保留字符的非 flow 值需要加引号。
-    """
-    import re as _re
-    stripped = val.strip()
-    # 合法的 YAML flow 结构，不引用
-    if _re.match(r'^\[.*?\]$', stripped) or _re.match(r'^\{.*?\}$', stripped):
-        return False
-    return bool(_re.search(r'[(){}[\]@]', val))
 
 
 def _fix_bare_task_ids(lines: list[str]) -> list[str]:
@@ -376,7 +351,6 @@ def _fix_bare_task_ids(lines: list[str]) -> list[str]:
       - id: task-something
         name: "..."
     """
-    import re
     result = []
     i = 0
     while i < len(lines):
@@ -400,7 +374,6 @@ def _fix_bare_task_ids(lines: list[str]) -> list[str]:
 
 def _make_minimal_profile(text: str) -> dict:
     """从破损 YAML 中提取可用的 JDK/Framework 信息，构造最小可用 profile。"""
-    import re
     profile: dict = {
         "profile": "java-spring",
         "description": "Auto-generated minimal profile (original YAML was unrepairable)",
