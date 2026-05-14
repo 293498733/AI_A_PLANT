@@ -69,32 +69,26 @@ def setup_project(project_path: str, git_url: str = "", git_branch: str = "") ->
 
 
 def _clean_outputs(AD: Path, OUT: Path) -> None:
+    """白名单保留式清理：仅保留 logs/，其余 .ai-dev/ 一级条目全部删除。"""
+    import shutil as _shutil
+
+    KEEP = {"logs"}  # 历史运行日志，排查问题唯一依据
     cleaned = []
-    if OUT.exists():
-        for f in OUT.glob("*"):
-            if f.is_file():
-                f.unlink()
-                cleaned.append(f.name)
-    for name in [
-        ".pipeline_stage", ".pipeline_note",
-        "requirement-raw.md", "requirement.md",
-        "task_state.json", "tasks.yaml",
-    ]:
-        f = AD / name
-        if f.exists():
-            f.unlink()
-            cleaned.append(name)
-    # 清理残留沙箱 worktree
-    sandboxes_dir = AD / "sandboxes"
-    if sandboxes_dir.exists():
-        import shutil as _shutil
+
+    for entry in AD.iterdir():
+        if entry.name in KEEP:
+            continue
         try:
-            _shutil.rmtree(sandboxes_dir)
-            cleaned.append("sandboxes/")
-        except Exception:
-            pass
+            if entry.is_dir():
+                _shutil.rmtree(entry)
+            else:
+                entry.unlink()
+            cleaned.append(entry.name + ("/" if entry.is_dir() else ""))
+        except Exception as e:
+            print(f"  警告: 无法删除 {entry.name}: {e}")
+
     if cleaned:
-        print(f"  已清除: {', '.join(cleaned)}")
+        print(f"  已清除: {', '.join(sorted(cleaned))}")
 
 
 def expand_params(params: dict[str, str], P: Path, AD: Path, OUT: Path) -> dict[str, str]:
