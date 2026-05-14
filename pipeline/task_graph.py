@@ -13,7 +13,7 @@ from pathlib import Path
 from itertools import groupby
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from pipeline.config import TaskGraphConfig, TaskConfig, load_task_graph, load_profile
+from pipeline.config import TaskGraphConfig, TaskConfig, load_task_graph, load_profile, EmptyTaskGraphError
 from pipeline.task_state import (
     TaskStateManager, STATUS_PENDING, STATUS_COMPLETED,
     STATUS_FAILED, STATUS_SKIPPED,

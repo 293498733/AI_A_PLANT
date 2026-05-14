@@ -24,7 +24,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipeline import __version__
 from pipeline.logger import init as init_logger, get as get_logger
-from pipeline.config import load_pipeline, load_profile as load_project_profile
+from pipeline.config import load_pipeline, load_profile as load_project_profile, EmptyTaskGraphError
 from pipeline.state import (
     read_stage, write_stage, clear_stage,
     read_note, write_note, clear_note,
@@ -358,15 +358,27 @@ def main():
             print(SEPARATOR)
 
             task_start = time.time()
-            success, _ = execute_task_graph(
-                project_root=P,
-                ai_dev_dir=AD,
-                tasks_file=tasks_file,
-                profile_path=AD / "profile.yml",
-                task_recipe=expanded_params.get("task_recipe",
-                    "recipes/steps/task-template.yaml"),
-                quiet=not args.verbose,
-            )
+            try:
+                success, _ = execute_task_graph(
+                    project_root=P,
+                    ai_dev_dir=AD,
+                    tasks_file=tasks_file,
+                    profile_path=AD / "profile.yml",
+                    task_recipe=expanded_params.get("task_recipe",
+                        "recipes/steps/task-template.yaml"),
+                    quiet=not args.verbose,
+                )
+            except EmptyTaskGraphError as e:
+                logger.error(f"任务图加载失败: {e}")
+                print(f"\n  ❌ 任务图为空，无法执行。")
+                print(f"  {e}")
+                action = handle_error(AD)
+                if action == Action.SKIP:
+                    elapsed = time.time() - task_start
+                    stage_times.append((stage.name, elapsed, "❌ 空任务图"))
+                    continue
+                else:
+                    return
 
             if success:
                 write_stage(AD, stage.state_value)

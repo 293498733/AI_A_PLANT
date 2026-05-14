@@ -97,30 +97,50 @@ def load_pipeline(path: Path) -> PipelineConfig:
     return PipelineConfig(stages=stages)
 
 
+class EmptyTaskGraphError(Exception):
+    """tasks.yaml 解析后无有效任务——可能因 YAML 语法错误或缺少 id 字段。"""
+
+
 def load_task_graph(path: Path) -> TaskGraphConfig:
-    """从 tasks.yaml 加载任务图定义。自动跳过无效任务并校验依赖引用。"""
+    """从 tasks.yaml 加载任务图定义。自动跳过无效任务并校验依赖引用。
+
+    Raises:
+        FileNotFoundError: tasks.yaml 不存在
+        EmptyTaskGraphError: 文件存在但无法提取任何有效任务（YAML 语法错误或缺失 id 字段）
+    """
     if not path.exists():
         raise FileNotFoundError(f"task graph config not found: {path}")
 
     with open(path, encoding="utf-8") as f:
         text = f.read()
+
+    repair_attempted = False
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError:
         logger.warning("tasks.yaml has YAML syntax errors, attempting auto-repair")
         repaired = _repair_yaml(text)
+        repair_attempted = True
         try:
             data = yaml.safe_load(repaired)
             path.write_text(repaired, encoding="utf-8")
             logger.info("tasks.yaml auto-repaired and saved")
         except yaml.YAMLError as e:
-            logger.error(f"tasks.yaml repair failed, using empty task graph: {e}")
-            return TaskGraphConfig(tasks=[], total_estimated_turns=0)
+            raise EmptyTaskGraphError(
+                f"tasks.yaml YAML 语法错误无法自动修复: {e}\n"
+                f"  文件: {path}\n"
+                f"  建议: 检查 YAML 缩进、特殊字符引号、块标量语法"
+            )
 
     tasks = []
     task_ids: set[str] = set()
     skipped = 0
     for item in data.get("tasks", []):
+        if not isinstance(item, dict):
+            # YAML 序列包含非映射项（如 bare string），报告并跳过
+            logger.warning(f"Skipping non-mapping task entry: {str(item)[:100]}")
+            skipped += 1
+            continue
         tid = item.get("id")
         if not tid:
             logger.warning(f"Skipping task without 'id': {item.get('name', str(item)[:80])}")
@@ -166,6 +186,22 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
             sandbox_enabled=item.get("sandbox_enabled", True),
         ))
 
+    if not tasks:
+        raw_items = data.get("tasks", [])
+        if raw_items:
+            raise EmptyTaskGraphError(
+                f"tasks.yaml 中 {len(raw_items)} 个条目均无法解析为有效任务\n"
+                f"  文件: {path}\n"
+                f"  已跳过: {skipped} 个\n"
+                f"  常见原因: 任务条目缺少 'id:' 字段前缀\n"
+                f"  示例: '- task-name' 应改为 '- id: task-name'"
+            )
+        raise EmptyTaskGraphError(
+            f"tasks.yaml 中未定义任何任务\n"
+            f"  文件: {path}\n"
+            f"  修复后: {'已' if repair_attempted else '无'}自动修复"
+        )
+
     # 后校验：检查 depends_on 引用的 task_id 是否存在
     for t in tasks:
         for dep in t.depends_on:
@@ -210,12 +246,19 @@ def load_profile(profile_path: Path) -> dict | None:
 
 
 def _repair_yaml(text: str) -> str:
-    """修复 goose 生成 YAML 时的常见语法错误：未加引号的值 + 块标量→引号。
+    """修复 goose 生成 YAML 时的常见语法错误。
 
-    策略：移除所有 YAML 块标量（| >），将其值用引号包裹。这比调试缩进更可靠。
+    修复策略（按优先级）：
+    1. bare task ID → - id: <bare-id>（缺 id: 前缀）
+    2. 块标量 | > → 引号字符串
+    3. 序列内联映射 - key: @value → 加引号
+    4. 普通映射 key: @value → 加引号
     """
     import re
     lines = text.splitlines()
+    # Pass 1: 修复缺少 id: 前缀的 bare task ID
+    lines = _fix_bare_task_ids(lines)
+    # Pass 2: 块标量 + 特殊字符引号修复
     fixed = []
     i = 0
     while i < len(lines):
@@ -225,36 +268,86 @@ def _repair_yaml(text: str) -> str:
         if m_block:
             indent = len(m_block.group(1))
             key_indent = indent
-            # 收集后续缩进更深的内容行作为值
             value_lines = []
             i += 1
             while i < len(lines):
                 stripped = lines[i].rstrip()
-                # 空行或注释跳过
                 if not stripped or stripped.lstrip().startswith('#'):
                     i += 1
                     continue
-                # 如果行缩进 <= 键缩进，说明块标量内容结束
                 leading_spaces = len(lines[i]) - len(lines[i].lstrip())
                 if leading_spaces <= key_indent:
                     break
                 value_lines.append(stripped)
                 i += 1
-            # 将多行值合并为引号字符串
             escaped = '\\n'.join(value_lines).replace('"', '\\"')
             fixed.append(f'{m_block.group(1)}{m_block.group(2)}: "{escaped}"')
             continue
 
-        # 修复未加引号的值（含 YAML 特殊字符）
+        # 修复 YAML 序列内联映射: - key: value（含 @ 等特殊字符）
+        m_seq = re.match(r'^(\s+)-\s+([\w-]+):\s+(.+)', line)
+        if m_seq and '\"' not in m_seq.group(3).lstrip() and '\'' not in m_seq.group(3).lstrip():
+            val = m_seq.group(3)
+            if _needs_quoting(val):
+                val = val.replace('\"', '\\"')
+                line = f'{m_seq.group(1)}- {m_seq.group(2)}: "{val}"'
+
+        # 修复普通映射 key: value 中未加引号的值
         m = re.match(r'^(\s+)([\w-]+):\s+(.+)', line)
         if m and '\"' not in m.group(3).lstrip() and '\'' not in m.group(3).lstrip():
             val = m.group(3)
-            if re.search(r'[(){}\[\]]|^@', val):
+            if _needs_quoting(val):
                 val = val.replace('\"', '\\"')
                 line = f'{m.group(1)}{m.group(2)}: "{val}"'
         fixed.append(line)
         i += 1
     return '\n'.join(fixed)
+
+
+def _needs_quoting(val: str) -> bool:
+    """检查 YAML 标量值是否需要引号包裹。
+
+    跳过合法的 YAML flow sequence/mapping ([] 或 {})，这些不加引号。
+    但包含 @ 等 YAML 保留字符的非 flow 值需要加引号。
+    """
+    import re as _re
+    stripped = val.strip()
+    # 合法的 YAML flow 结构，不引用
+    if _re.match(r'^\[.*?\]$', stripped) or _re.match(r'^\{.*?\}$', stripped):
+        return False
+    return bool(_re.search(r'[(){}[\]@]', val))
+
+
+def _fix_bare_task_ids(lines: list[str]) -> list[str]:
+    """修复 YAML 序列中缺少 id: 前缀的 bare task ID。
+
+    将:
+      - task-something
+        name: "..."
+    转换为:
+      - id: task-something
+        name: "..."
+    """
+    import re
+    result = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r'^(\s+)-\s+([\w-]+)$', line)
+        if m:
+            current_indent = len(m.group(1))
+            bare_value = m.group(2)
+            # 检查下一行是否是更深的缩进 + key: value 映射
+            if i + 1 < len(lines):
+                next_line = lines[i + 1]
+                next_indent = len(next_line) - len(next_line.lstrip())
+                if next_indent > current_indent and re.match(r'\s+[\w-]+\s*:', next_line):
+                    result.append(f'{m.group(1)}- id: {bare_value}')
+                    i += 1
+                    continue
+        result.append(line)
+        i += 1
+    return result
 
 
 def _make_minimal_profile(text: str) -> dict:
