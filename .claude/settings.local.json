@@ -43,7 +43,19 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code} %{time_total}s\" --connect-timeout 10 https://github.com)",
       "Bash(curl -s -o /dev/null -w \"%{http_code} %{time_total}s\" --connect-timeout 10 https://api.github.com)",
       "Bash(ping *)",
-      "Bash(curl -v --connect-timeout 10 https://github.com)"
+      "Bash(curl -v --connect-timeout 10 https://github.com)",
+      "Bash(JAVA_HOME='D:\\\\zulu17.54.21-ca-jdk17.0.13-win_x64' mvn --version)",
+      "Bash(JAVA_HOME='D:\\\\zulu17.54.21-ca-jdk17.0.13-win_x64' mvn -DskipTests compile)",
+      "Bash(GIT_CURL_VERBOSE=1 GIT_TRACE=1 git -C 'D:\\\\MyPrj\\\\ai-dev-flow' push origin main)",
+      "Bash(ssh -T git@github.com)",
+      "Skill(review)",
+      "Bash(winget install *)",
+      "Bash(jq *)",
+      "Read(//c/Users/dingan/AppData/Local/Microsoft/WinGet/Packages/jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe/**)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/dingan/AppData/**)",
+      "Bash(/c/Users/dingan/AppData/Local/Microsoft/WinGet/Packages/jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe/jq.exe *)",
+      "Skill(health)"
     ]
   }
 }

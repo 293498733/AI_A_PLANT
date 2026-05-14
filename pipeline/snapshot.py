@@ -10,7 +10,7 @@ import json
 import hashlib
 import logging
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger("ai-dev-flow")
 
@@ -174,7 +174,7 @@ class SnapshotManager:
             if old_entry.hash:
                 return old_entry.hash != new_hash
             # 旧快照无 hash（首次迁移），计算旧 hash
-            old_hash = hashlib.sha256(content).hexdigest()
+            hashlib.sha256(content).hexdigest()
             new_entry.hash = new_hash
             return True  # 无旧 hash 时保守视为变更
         except Exception:
