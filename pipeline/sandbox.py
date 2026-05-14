@@ -68,28 +68,9 @@ class SandboxManager:
             raise SandboxCreateError("git not found in PATH")
 
         # 初始化子模块 — 从主项目本地拷贝（避免网络依赖）
-        try:
-            result = subprocess.run(
-                ["git", "-C", str(self._project),
-                 "submodule", "status"],
-                capture_output=True, text=True, timeout=10,
-            )
-            for line in result.stdout.strip().splitlines():
-                if not line.strip():
-                    continue
-                # 格式: " hash submodule_path (branch)"
-                parts = line.lstrip(" +-").split()
-                if len(parts) >= 2:
-                    sub_path = parts[1]
-                    src = self._project / sub_path
-                    dst = self._sandbox_path / sub_path
-                    if src.exists() and src.is_dir():
-                        # 仅当目标为空或不存在时才拷贝
-                        if not dst.exists() or not any(dst.iterdir()):
-                            logger.info(f"Copying submodule '{sub_path}' to sandbox (local)")
-                            _robocopy_tree(src, dst)
-        except Exception as e:
-            logger.warning(f"Submodule copy failed (non-fatal): {e}")
+        # 使用 git config 直接解析 .gitmodules，避免 git submodule status
+        # 递归发现 sandbox worktree（含 .git 文件）导致 fatal 错误
+        _copy_submodules_to_sandbox(self._project, self._sandbox_path)
 
         logger.info(f"Sandbox created: {self._sandbox_path}")
         return self._sandbox_path
@@ -221,6 +202,47 @@ class SandboxManager:
             logger.info(f"Cleaned {len(cleaned)} orphaned sandbox(es)")
 
         return cleaned
+
+
+def _copy_submodules_to_sandbox(project_root: Path, sandbox_path: Path) -> None:
+    """从 .gitmodules 读取子模块列表，从主项目本地拷贝到沙箱。
+
+    不使用 git submodule status，因为沙箱 worktree 内的 .git 文件会被 git
+    误判为嵌套 repo（fatal: no submodule mapping found），导致子模块列表为空。
+    """
+    gitmodules = project_root / ".gitmodules"
+    if not gitmodules.exists():
+        return
+
+    try:
+        result = subprocess.run(
+            ["git", "config", "--file", str(gitmodules),
+             "--get-regexp", r"submodule\..*\.path"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
+
+    for line in result.stdout.strip().splitlines():
+        # 格式: "submodule.<name>.path <path>"
+        # 路径可能含空格，取 key 之后的部分
+        m = re.match(r"^submodule\.[^.]+\.path\s+(.+)$", line)
+        if not m:
+            continue
+        sub_path = m.group(1).strip()
+        src = project_root / sub_path
+        dst = sandbox_path / sub_path
+        if not (src.exists() and src.is_dir()):
+            continue
+        if dst.exists() and any(dst.iterdir()):
+            continue  # 已有内容，跳过
+        logger.info(f"Copying submodule '{sub_path}' to sandbox (local)")
+        try:
+            _robocopy_tree(src, dst)
+        except Exception as e:
+            logger.warning(f"Submodule copy failed for '{sub_path}': {e}")
 
 
 def _robocopy_tree(src: Path, dst: Path) -> None:
