@@ -661,17 +661,24 @@ def _run_verification_step(
     sandbox_path: Path, label: str, commands: list[str],
     timeout: int = VERIFY_TIMEOUT, env: dict[str, str] | None = None,
 ) -> tuple[bool, str]:
-    """在沙箱内执行一组验证命令。env 注入自定义环境变量（如 JAVA_HOME）。"""
+    """在沙箱内执行一组验证命令。env 注入自定义环境变量（如 JAVA_HOME）。
+
+    JAVA_HOME 通过 cmd /c \"set JAVA_HOME=... && ...\" 方式注入，
+    避免 subprocess env 传递在 Windows 上的不稳定性。
+    """
     merged_env = None
+    java_home_prefix = ""
     if env:
         merged_env = {**os.environ, **env}
-        logger.debug(f"Verification env: JAVA_HOME={merged_env.get('JAVA_HOME', 'NOT SET')}")
-    else:
-        logger.debug(f"Verification env: None (inheriting system JAVA_HOME={os.environ.get('JAVA_HOME', 'NOT SET')})")
+        jh = merged_env.get("JAVA_HOME", "")
+        if jh:
+            java_home_prefix = f'set "JAVA_HOME={jh}" && '
+            logger.debug(f"Verification: prepending JAVA_HOME={jh}")
     for cmd in commands:
         try:
+            wrapped_cmd = f'{java_home_prefix}{cmd}'
             proc = subprocess.run(
-                cmd,
+                wrapped_cmd,
                 cwd=str(sandbox_path),
                 shell=True,
                 capture_output=True,
