@@ -82,6 +82,11 @@ class SandboxManager:
 
         synced = []
         for rel_path in output_files:
+            # 路径穿越检测：拒绝含 .. 或绝对路径的产出文件
+            if not self._safe_rel_path(rel_path):
+                logger.warning(f"Rejected unsafe output path: {rel_path}")
+                continue
+
             src = self._sandbox_path / rel_path
             dst = self._project / rel_path
 
@@ -98,6 +103,14 @@ class SandboxManager:
             logger.info(f"Synced {len(synced)} files from sandbox to project")
 
         return synced
+
+    @staticmethod
+    def _safe_rel_path(rel_path: str) -> bool:
+        """拒绝含 .. 或绝对路径的路径，防御沙箱穿越。"""
+        p = Path(rel_path)
+        if p.is_absolute() or '..' in p.parts:
+            return False
+        return True
 
     def detect_extra_modifications(self, task_output_files: set[str]) -> list[str]:
         """检测沙箱中未被任务声明的文件变更。"""
@@ -181,8 +194,8 @@ class SandboxManager:
                         capture_output=True, text=True,
                         timeout=15,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"git worktree remove failed for {child.name}: {e}")
 
                 shutil.rmtree(child, ignore_errors=True)
                 cleaned.append(child.name)
@@ -195,8 +208,8 @@ class SandboxManager:
                 capture_output=True, text=True,
                 timeout=10,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"git worktree prune failed: {e}")
 
         if cleaned:
             logger.info(f"Cleaned {len(cleaned)} orphaned sandbox(es)")
