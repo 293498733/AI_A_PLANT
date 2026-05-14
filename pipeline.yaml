@@ -27,7 +27,7 @@ stages:
       project_root: "{P}"
       profile: "{AD}/profile.yml"
       project_map: "{AD}/project-map.md"
-      requirement_raw: "{AD}/requirement-raw.md"
+      requirement_raw: "{REQ}"
       requirement: "{AD}/requirement.md"
     output_file: "{AD}/requirement.md"
     state_value: refine_done

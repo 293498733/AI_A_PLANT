@@ -91,11 +91,13 @@ def _clean_outputs(AD: Path, OUT: Path) -> None:
         print(f"  已清除: {', '.join(sorted(cleaned))}")
 
 
-def expand_params(params: dict[str, str], P: Path, AD: Path, OUT: Path) -> dict[str, str]:
+def expand_params(params: dict[str, str], P: Path, AD: Path, OUT: Path,
+                  req_path: str = "") -> dict[str, str]:
     mapping = {
         "{P}": str(P),
         "{AD}": str(AD),
         "{OUT}": str(OUT),
+        "{REQ}": req_path,
     }
     expanded = {}
     for key, value in params.items():
@@ -247,7 +249,9 @@ def main():
 
     # 处理需求文件
     req_file = args.req
-    if not req_file:
+    if req_file:
+        req_file = str(Path(req_file).resolve())
+    else:
         note = read_note(AD)
         if note:
             print()
@@ -265,11 +269,8 @@ def main():
 
         if not args.ci:
             req_file = input("需求文件路径 (留空跳过): ").strip().strip('"')
-        if req_file and Path(req_file).exists():
-            dest = AD / "requirement-raw.md"
-            shutil.copy(req_file, str(dest))
-            logger.info(f"需求文件已复制到 {dest}")
-            write_stage(AD, "input_done")
+        if req_file:
+            req_file = str(Path(req_file).resolve())
 
     # 确定起始阶段
     current_state = read_stage(AD)
@@ -327,7 +328,7 @@ def main():
                     preview_file = _resolve_output_path(prev_stage.output_file, P, AD, OUT)
                     break
 
-            prompt_text = expand_params({"_": stage.checkpoint_prompt}, P, AD, OUT)["_"]
+            prompt_text = expand_params({"_": stage.checkpoint_prompt}, P, AD, OUT, req_file or "")["_"]
             confirm(f"{progress} {stage.name}", prompt_text, preview_file)
             write_stage(AD, stage.state_value)
             elapsed = time.time() - stage_start
@@ -336,7 +337,7 @@ def main():
 
         # Task Graph 阶段 — 路由到任务图执行器
         if stage.is_task_graph:
-            expanded_params = expand_params(stage.params, P, AD, OUT)
+            expanded_params = expand_params(stage.params, P, AD, OUT, req_file or "")
             tasks_file = Path(expanded_params["tasks_file"])
             if not tasks_file.exists():
                 logger.error(f"tasks.yaml 不存在: {tasks_file}")
@@ -406,7 +407,7 @@ def main():
                 logger.warning("tasks.yaml was modified by a later phase, restoring original")
                 tasks_file.write_text(_tasks_snapshot, encoding="utf-8")
 
-        expanded_params = expand_params(stage.params, P, AD, OUT)
+        expanded_params = expand_params(stage.params, P, AD, OUT, req_file or "")
         recipe_path = str(PROJECT_ROOT / stage.recipe)
         before_files = _snapshot_outputs(OUT)
 
