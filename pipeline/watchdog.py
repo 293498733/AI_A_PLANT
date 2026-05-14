@@ -84,18 +84,18 @@ class ProcessWatchdog:
                 ["taskkill", "/F", "/T", "/PID", str(self._pid)],
                 capture_output=True, text=True,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Retry taskkill failed for PID {self._pid}: {e}")
 
     def _kill_unix(self):
         import signal
         try:
             os.killpg(os.getpgid(self._pid), signal.SIGKILL)
-        except Exception:
+        except Exception as e1:
             try:
                 os.kill(self._pid, signal.SIGKILL)
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.error(f"Unix kill failed for PID {self._pid}: killpg={e1}, kill={e2}")
 
     def _is_process_dead(self) -> bool:
         try:
