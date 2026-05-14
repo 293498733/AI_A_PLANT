@@ -37,7 +37,8 @@ from pipeline.git_ops import GitOps  # noqa: E402
 SEPARATOR = "=" * 60
 
 
-def setup_project(project_path: str, git_url: str = "", git_branch: str = "") -> tuple[Path, Path, Path]:
+def setup_project(project_path: str, git_url: str = "", git_branch: str = "",
+                  pull: bool = False) -> tuple[Path, Path, Path]:
     p = Path(project_path).resolve()
     if not p.exists():
         if git_url:
@@ -58,6 +59,20 @@ def setup_project(project_path: str, git_url: str = "", git_branch: str = "") ->
             print("  clone 完成")
         else:
             raise FileNotFoundError(f"项目目录不存在: {p}")
+    elif pull:
+        _git = (p / ".git").exists()
+        if _git:
+            branch = git_branch or "main"
+            print(f"  拉取最新代码 ({branch})...")
+            result = subprocess.run(
+                ["git", "-C", str(p), "pull", "origin", branch],
+                capture_output=True, text=True,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                print(f"  警告: git pull 失败 — {result.stderr.strip()[:200]}")
+            else:
+                print(f"  pull 完成")
 
     ad = p / ".ai-dev"
     out = ad / "outputs"
@@ -151,6 +166,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际执行")
     parser.add_argument("--debug", action="store_true", help="调试模式")
     parser.add_argument("--verbose", action="store_true", help="goose 全量输出（默认 -q 静默，仅显示模型回复）")
+    parser.add_argument("--pull", action="store_true", help="启动前 git pull 拉取最新代码")
     parser.add_argument("--ci", action="store_true", help="CI 模式，跳过所有人工交互，自动使用默认选择")
     parser.add_argument("--version", action="version", version=f"ai-dev-flow v{__version__}")
     args = parser.parse_args()
@@ -173,7 +189,8 @@ def main():
 
     P, AD, OUT = setup_project(project_path,
                                 git_url=args.git_url or "",
-                                git_branch=args.git_branch or "")
+                                git_branch=args.git_branch or "",
+                                pull=args.pull)
     logger = init_logger(P, debug=args.debug)
     logger.info(f"项目: {P}")
 
