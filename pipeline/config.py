@@ -166,6 +166,25 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
             logger.warning(f"Task {tid}: invalid priority={priority}, using P1")
             priority = "P1"
 
+        # 校验 output_files — 过滤 AI 幻觉的非文件路径（纯中文描述等）
+        raw_outputs = item.get("output_files", [])
+        valid_outputs = []
+        for f in raw_outputs:
+            if not isinstance(f, str) or not f.strip():
+                continue
+            if _looks_like_file_path(f):
+                valid_outputs.append(f)
+            else:
+                logger.warning(
+                    f"Task {tid}: output_file '{f}' does not look like a file path — "
+                    f"likely an AI hallucination, skipping"
+                )
+        if len(valid_outputs) < len(raw_outputs):
+            logger.warning(
+                f"Task {tid}: filtered {len(raw_outputs) - len(valid_outputs)}/{len(raw_outputs)} "
+                f"invalid output_files"
+            )
+
         tasks.append(TaskConfig(
             id=tid,
             name=item.get("name", tid),
@@ -175,7 +194,7 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
             priority=priority,
             depends_on=item.get("depends_on", []),
             input_files=item.get("input_files", []),
-            output_files=item.get("output_files", []),
+            output_files=valid_outputs,
             context_notes=item.get("context_notes", ""),
             reference_docs=item.get("reference_docs", []),
             module=item.get("module", ""),
@@ -302,6 +321,35 @@ def _repair_yaml(text: str) -> str:
         fixed.append(line)
         i += 1
     return '\n'.join(fixed)
+
+
+def _looks_like_file_path(s: str) -> bool:
+    """判断字符串是否像文件路径（而非 AI 幻觉的中文描述）。
+
+    合法特征（满足任一即通过）：
+    - 包含路径分隔符 / 或 \\
+    - 有文件扩展名（.xx 后缀）
+    - 是已知的占位符路径模式
+
+    纯中文、无扩展名、无路径分隔符的字符串视为无效。
+    """
+    import re as _re
+    s = s.strip()
+    if not s:
+        return False
+    # 路径分隔符
+    if "/" in s or "\\" in s:
+        return True
+    # 文件扩展名（.xxx，2-10 个字母数字）
+    if _re.search(r'\.[a-zA-Z0-9]{1,10}$', s):
+        return True
+    # 纯中文且无路径结构 → AI 幻觉
+    if _re.match(r'^[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef（）()，。、《》？?！!：:；;]+$', s):
+        return False
+    # 兜底：如果有英文/数字混合，可能是合法文件名
+    if _re.search(r'[a-zA-Z0-9]', s):
+        return True
+    return False
 
 
 def _needs_quoting(val: str) -> bool:
