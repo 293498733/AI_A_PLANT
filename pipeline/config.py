@@ -41,7 +41,7 @@ class TaskConfig:
     sub_pipeline: bool = False  # 大模块内走 mini-pipeline（方案→编码→测试→审查）
     retry_limit: int = 2
     timeout_minutes: int = 15
-    sandbox_enabled: bool = True  # 任务是否在 git worktree 沙箱中执行
+    sandbox_enabled: bool = False  # 任务是否在 git worktree 沙箱中执行（默认关闭，稳定后再开启）
 
 
 @dataclass
@@ -183,7 +183,7 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
             sub_pipeline=item.get("sub_pipeline", False),
             retry_limit=item.get("retry_limit", 2),
             timeout_minutes=item.get("timeout_minutes", 15),
-            sandbox_enabled=item.get("sandbox_enabled", True),
+            sandbox_enabled=item.get("sandbox_enabled", False),
         ))
 
     if not tasks:
