@@ -112,7 +112,7 @@
 - [x] **单任务验证闭环**（v3.4.0）：沙箱内 goose 完成后 → 编译验证 → 测试验证 → 全部通过才 sync 回真实项目。编译/测试命令从 profile.yml commands 取，任一失败保留沙箱供排查，即时反馈不传染后续任务
 - [x] **goose 输出静默**（v3.5.0）：executor 默认传 `-q` 给 goose，仅显示模型回复，隐藏文件扫描噪音；加 `--verbose` flag 恢复全量输出
 - [x] **子管线执行器**（v3.6.0）：大模块内部走 mini-pipeline（方案→编码→测试→审查），`TaskConfig.sub_pipeline=True` 触发，4 阶段累计上下文，任一阶段失败保留沙箱
-- [ ] **`--new` 白名单保留式清理**：当前是列 8 个文件名逐个删，遗漏了 `task_contexts/`（51 文件）、`summaries/`（14 文件）、`logs/`（堆积）、`snapshot.json`、`prompts/` 等。改为遍历 `.ai-dev/` 一级条目，仅保留 `logs/`，其余全部删除。避免白名单遗漏导致跨运行状态污染
+- [x] **`--new` 白名单保留式清理**：遍历 `.ai-dev/` 一级条目，仅保留 `logs/`，其余全部删除。解决原来列 8 个文件名逐个删导致 `task_contexts/`、`summaries/`、`snapshot.json` 等遗漏的问题
 
 ### P2 — 质量体系
 - [ ] **多代理审查**：独立 goose session + 对立视角 prompt
