@@ -55,7 +55,11 @@
       "Read(//c/Program Files/**)",
       "Read(//c/Users/dingan/AppData/**)",
       "Bash(/c/Users/dingan/AppData/Local/Microsoft/WinGet/Packages/jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe/jq.exe *)",
-      "Skill(health)"
+      "Skill(health)",
+      "Bash(attrib *)",
+      "Bash(mv \"D:\\\\MyPrj\\\\ai-dev-flow\\\\.claude\\\\adrs\" \"D:\\\\MyPrj\\\\ai-dev-flow\\\\docs\\\\adrs\")",
+      "Bash(mv \"D:\\\\MyPrj\\\\ai-dev-flow\\\\.claude\\\\plans\" \"D:\\\\MyPrj\\\\ai-dev-flow\\\\docs\\\\plans\")",
+      "Bash(mv \"D:\\\\MyPrj\\\\ai-dev-flow\\\\.claude\\\\status.md\" \"D:\\\\MyPrj\\\\ai-dev-flow\\\\docs\\\\status.md\")"
     ]
   }
 }

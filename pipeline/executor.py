@@ -6,6 +6,7 @@ import shutil
 import logging
 import threading
 import subprocess
+from collections import deque
 from pathlib import Path
 
 from pipeline.watchdog import ProcessWatchdog
@@ -150,6 +151,7 @@ def _run_with_watchdog(
     stderr_lines: list[str] = []
     stdout_lines: list[str] = []
     heartbeat = {"last": time.time()}
+    recent_stderr: deque[str] = deque(maxlen=10)  # 最近 stderr 行，用于循环检测
 
     def _read_stdout():
         for raw_line in proc.stdout:
@@ -164,6 +166,7 @@ def _run_with_watchdog(
             stripped = line.rstrip()
             if stripped:
                 stderr_lines.append(stripped)
+                recent_stderr.append(stripped)
                 logger.warning(f"[goose] {stripped}")
                 heartbeat["last"] = time.time()
 
@@ -178,8 +181,12 @@ def _run_with_watchdog(
         watchdog = ProcessWatchdog(proc.pid, timeout_seconds, on_timeout=on_timeout)
         watchdog.start()
 
-    # 心跳日志（含进程状态诊断）
+    # 心跳日志（含进程状态诊断 + 循环检测）
+    LOOP_DETECT_THRESHOLD = 5  # 连续相同 stderr 行 >= 5 次视为循环
+    _loop_warning_count = 0
+
     def _heartbeat_loop():
+        nonlocal _loop_warning_count
         while proc.poll() is None:
             elapsed = time.time() - heartbeat["last"]
             if elapsed > HEARTBEAT_INTERVAL:
@@ -187,6 +194,18 @@ def _run_with_watchdog(
                 logger.warning(
                     f"Goose has produced no output for {int(elapsed)}s (pid={proc.pid}, {info})"
                 )
+            # 循环检测：最近 N 行 stderr 全部相同 → 卡死在重试循环
+            if len(recent_stderr) >= LOOP_DETECT_THRESHOLD:
+                recent_list = list(recent_stderr)
+                if all(line == recent_list[-1] for line in recent_list[-LOOP_DETECT_THRESHOLD:]):
+                    _loop_warning_count += 1
+                    if _loop_warning_count >= 3:
+                        logger.critical(
+                            f"Goose appears stuck in a retry loop (same stderr {LOOP_DETECT_THRESHOLD}x): "
+                            f"{recent_list[-1][:200]}"
+                        )
+                        proc.kill()
+                        break
             time.sleep(min(HEARTBEAT_INTERVAL, 30))
 
     heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)

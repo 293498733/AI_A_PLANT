@@ -2,8 +2,10 @@
 
 v3.3: 并发上限控制 — ThreadPoolExecutor + parallel_group 分组 + max_workers 背压。
 v3.4: 单任务验证闭环 — goose 产出后沙箱内编译+测试，全部通过才 sync。
+v3.8: 按任务类型验证 + 三元任务状态 + JAVA_HOME 加固 + 阶段前置守卫。
 """
 
+import json
 import os
 import re
 import time
@@ -17,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pipeline.config import TaskConfig, load_task_graph, load_profile
 from pipeline.task_state import (
     TaskStateManager, STATUS_PENDING, STATUS_COMPLETED,
+    STATUS_CODE_PRODUCED, STATUS_FAILED_NO_OUTPUT,
     STATUS_FAILED, STATUS_SKIPPED,
 )
 from pipeline.task_context import ContextAssembler
@@ -87,10 +90,10 @@ def execute_task_graph(
     # 清理上次崩溃可能留下的残留 sandbox
     SandboxManager.cleanup_orphaned(project_root, ai_dev_dir)
 
-    # 自动跳过已耗尽重试的失败任务
+    # 自动跳过已耗尽重试的失败任务（包括 code_produced 和 failed_no_output）
     for tid in task_ids:
         tr = state_mgr.tasks[tid]
-        if tr["status"] == STATUS_FAILED and tr["retries"] >= tasks[tid].retry_limit:
+        if tr["status"] in (STATUS_FAILED, STATUS_FAILED_NO_OUTPUT) and tr["retries"] >= tasks[tid].retry_limit:
             logger.warning(f"Task {tid} retries exhausted ({tr['retries']}/{tasks[tid].retry_limit}), auto-skip")
             state_mgr.tasks[tid]["status"] = STATUS_SKIPPED
             state_mgr.tasks[tid]["notes"] = "Auto-skipped: retries exhausted"
@@ -120,34 +123,31 @@ def execute_task_graph(
     total = len(graph.tasks)
     task_recipe_path = str(Path(__file__).resolve().parent.parent / task_recipe)
 
-    # 加载 profile 并提取验证步骤
+    # 加载 profile（供各任务按类型解析验证步骤）
     profile = load_profile(profile_path) or {}
-    verification_steps = _get_verification_steps(profile)
 
-    # JDK 自动检测（验证步骤需要 Java 时）
+    # JDK 自动检测（所有需要 Java 验证的任务共享）
     verify_env: dict[str, str] = {}
-    if verification_steps:
-        labels = [label for label, _ in verification_steps]
-        print(f"  验证闭环: {' → '.join(labels)}")
-        try:
-            jdk_required = int(profile.get("backend", {}).get("jdk", {}).get("compileRelease", 17))
-        except (TypeError, ValueError):
-            jdk_required = 17
-        try:
-            jdk_home = detect_jdk(jdk_required)
-            verify_env["JAVA_HOME"] = jdk_home
-            print(f"  JDK 检测: {jdk_home}")
-        except JdkNotFound as e:
-            logger.warning(f"JDK detection failed: {e}")
-            print(f"  ⚠️ {e}")
+    try:
+        jdk_required = int(profile.get("backend", {}).get("jdk", {}).get("compileRelease", 17))
+    except (TypeError, ValueError):
+        jdk_required = 17
+    try:
+        jdk_home = detect_jdk(jdk_required)
+        verify_env["JAVA_HOME"] = jdk_home
+        print(f"  JDK 检测: {jdk_home}")
+        print(f"  验证策略: 按任务类型自动选择（auto → backend/frontend/none）")
+    except JdkNotFound as e:
+        logger.warning(f"JDK detection failed: {e}")
+        print(f"  ⚠️ {e}")
     print(SEPARATOR)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         while True:
-            # 计算已完成集合
+            # 计算已完成集合（code_produced 视为完成，下游不应被阻塞）
             completed_ids: set[str] = set()
             for tid, tr in state_mgr.tasks.items():
-                if tr["status"] in (STATUS_COMPLETED, STATUS_SKIPPED):
+                if tr["status"] in (STATUS_COMPLETED, STATUS_SKIPPED, STATUS_CODE_PRODUCED):
                     completed_ids.add(tid)
 
             # 找就绪任务
@@ -163,9 +163,9 @@ def execute_task_graph(
                     print(SEPARATOR)
                     return True, state_mgr.tasks
                 elif failed > 0 and all(
-                    state_mgr.tasks[tid]["status"] == STATUS_FAILED
+                    state_mgr.tasks[tid]["status"] in (STATUS_FAILED, STATUS_FAILED_NO_OUTPUT)
                     for tid in task_ids
-                    if state_mgr.tasks[tid]["status"] not in (STATUS_COMPLETED, STATUS_SKIPPED)
+                    if state_mgr.tasks[tid]["status"] not in (STATUS_COMPLETED, STATUS_SKIPPED, STATUS_CODE_PRODUCED)
                 ):
                     logger.error("Task graph blocked by failures")
                     return False, state_mgr.tasks
@@ -178,7 +178,7 @@ def execute_task_graph(
                     for tid in pending:
                         task = tasks[tid]
                         unmet = [dep for dep in task.depends_on if dep not in completed_ids]
-                        if any(state_mgr.tasks[dep]["status"] == STATUS_FAILED for dep in unmet):
+                        if any(state_mgr.tasks[dep]["status"] in (STATUS_FAILED, STATUS_FAILED_NO_OUTPUT) for dep in unmet):
                             blocked.append(tid)
                     if blocked:
                         logger.error(f"Tasks blocked by failed dependencies: {blocked}")
@@ -232,7 +232,7 @@ def execute_task_graph(
                     profile_path=profile_path,
                     task_recipe=task_recipe_path,
                     lock=lock,
-                    verification_steps=verification_steps,
+                    profile=profile,
                     verify_env=verify_env,
                     quiet=quiet,
                 )
@@ -280,7 +280,7 @@ def _execute_single_task(
     profile_path: Path,
     task_recipe: str,
     lock: threading.Lock,
-    verification_steps: list[tuple[str, list[str]]] | None = None,
+    profile: dict | None = None,
     verify_env: dict[str, str] | None = None,
     quiet: bool = True,
 ) -> str:
@@ -289,7 +289,7 @@ def _execute_single_task(
     锁范围：pre-execution（状态写入 + 沙箱创建）和 post-execution（状态更新 + git + snapshot）
     不锁定：goose 子进程执行 + 验证步骤（主要耗时部分）。
 
-    verification_steps: [(label, [cmd, ...]), ...] 如 [("compile", ["mvn compile"]), ("test", ["mvn test"])]
+    profile: 项目画像，用于 _resolve_verification_steps 按任务类型选择验证策略。
     verify_env: 注入到验证子进程的环境变量（如 JAVA_HOME）。
     quiet: True 时 goose 传 -q，隐藏文件扫描噪音。
     """
@@ -405,7 +405,12 @@ def _execute_single_task(
                 logger.warning(f"Task {tid} completed but missing in sandbox: {missing}")
                 if sandbox:
                     logger.warning(f"Sandbox preserved at: {sandbox_path}")
-                state_mgr.mark_failed(tid, f"Goose completed but missing output files: {missing}")
+                err = _build_structured_error(
+                    "output_check", result.returncode,
+                    f"Goose completed but missing output files: {missing}",
+                    task, sandbox_path, verify_env,
+                )
+                state_mgr.mark_failed_no_output(tid, err)
                 state_mgr.save()
                 print(f"  ❌ 失败 ({mins}m{secs}s) — 缺少文件: {missing}")
                 tr = state_mgr.tasks[tid]
@@ -432,15 +437,16 @@ def _execute_single_task(
                     if extra:
                         logger.warning(f"Task {tid} modified undeclared files: {extra}")
 
-                # === 验证闭环：沙箱内编译+测试（v3.4） ===
+                # === 验证闭环：按任务类型选择验证策略（v3.8） ===
                 verify_failed = False
-                if verification_steps:
-                    print(f"  🔍 验证中（{' → '.join(label for label, _ in verification_steps)}）...")
-                    for label, commands in verification_steps:
+                task_verification = _resolve_verification_steps(task, profile)
+                if task_verification:
+                    labels = [label for label, _ in task_verification]
+                    print(f"  🔍 验证中 ({task.verification}: {' → '.join(labels)})...")
+                    for label, commands in task_verification:
                         passed, output = _run_verification_step(sandbox_path, label, commands, env=verify_env)
                         if not passed:
                             print(f"  ❌ 验证失败: {label}")
-                            # Print tail of output for diagnosis
                             for line in output.splitlines()[-15:]:
                                 print(f"      {line}")
                             verify_failed = True
@@ -451,8 +457,15 @@ def _execute_single_task(
                         # 保留沙箱供排查
                         if sandbox:
                             logger.warning(f"Task {tid} verification failed, sandbox preserved at: {sandbox_path}")
-                        state_mgr.mark_failed(tid, f"Verification failed: {label}\n{output[-500:]}")
+                        err = _build_structured_error(
+                            "verification", result.returncode,
+                            f"Verification failed: {label}\n{output[-500:]}",
+                            task, sandbox_path, verify_env,
+                            commands=[cmd for _, cmds in task_verification for cmd in cmds],
+                        )
+                        state_mgr.mark_code_produced(tid, task.output_files, verification_error=err)
                         state_mgr.save()
+                        print(f"  ⚠️ 代码已产出，验证未通过 ({mins}m{secs}s)")
                         tr = state_mgr.tasks[tid]
                         action = handle_task_error(
                             tid, task.name, tr["retries"],
@@ -495,11 +508,15 @@ def _execute_single_task(
                       (f" — {commit_hash}" if commit_hash else ""))
                 return _TASK_OK
         else:
-            # 失败 — 保留沙箱供排查
+            # goose 退出失败 — 保留沙箱供排查
             if sandbox:
                 logger.warning(f"Task {tid} failed, sandbox preserved at: {sandbox_path}")
-            state_mgr.mark_failed(tid,
-                f"goose exit {result.returncode}: {result.stderr[:500]}")
+            err = _build_structured_error(
+                "goose_execution", result.returncode,
+                f"goose exit {result.returncode}: {result.stderr[:500]}",
+                task, sandbox_path, verify_env,
+            )
+            state_mgr.mark_failed_no_output(tid, err)
             state_mgr.save()
             print(f"  ❌ 失败 ({mins}m{secs}s)")
 
@@ -523,6 +540,37 @@ def _execute_single_task(
             elif action == TaskAction.NOTE_EXIT:
                 return _TASK_NOTE_EXIT
             return _TASK_SKIP  # fallback
+
+
+def _build_structured_error(
+    phase: str, goose_exit: int | None, error_detail: str,
+    task: TaskConfig, sandbox_path: Path | None,
+    verify_env: dict[str, str] | None,
+    commands: list[str] | None = None,
+) -> str:
+    """构造结构化错误信息，便于事后诊断。
+
+    包含阶段、goose 退出码、环境信息、文件存在性检查。
+    """
+    record: dict = {
+        "phase": phase,
+        "goose_exit_code": goose_exit,
+        "error": error_detail,
+        "declared_outputs": list(task.output_files),
+    }
+    if sandbox_path:
+        record["files_on_disk"] = {
+            f: (sandbox_path / f).exists()
+            for f in task.output_files
+        }
+    if verify_env:
+        record["env_java_home"] = verify_env.get("JAVA_HOME", "not set")
+    if commands:
+        record["verification_commands"] = commands
+    try:
+        return json.dumps(record, ensure_ascii=False, indent=2)
+    except TypeError:
+        return f"phase={phase} goose_exit={goose_exit} error={error_detail}"
 
 
 def _write_context_file(ai_dev_dir: Path, task_id: str, context_text: str) -> str:
@@ -556,6 +604,19 @@ def _detect_residual_files(project_root: Path, task: TaskConfig) -> list[str]:
 
 VERIFY_TIMEOUT = 600  # 每步验证超时（秒）
 _UNSAFE_SHELL_RE = re.compile(r'[;&|`$(){}\[\]!><\n\r]')  # shell 元字符检测
+
+
+def _verify_java_home(java_home: str) -> bool:
+    """Pre-flight 检查：验证 JAVA_HOME 路径下 java.exe 是否可执行。"""
+    java_exe = os.path.join(java_home, "bin", "java.exe")
+    try:
+        result = subprocess.run(
+            [java_exe, "-version"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
 
 # 子管线阶段定义：(名称, 目标描述, 轮次比例)
 _SUB_PIPELINE_PHASES: list[tuple[str, str, float]] = [
@@ -645,51 +706,83 @@ def _run_sub_pipeline(
     return result, None
 
 
-def _get_verification_steps(profile: dict) -> list[tuple[str, list[str]]]:
-    """从 profile 提取验证步骤：编译 → 测试。
+def _resolve_verification_steps(
+    task: TaskConfig, profile: dict | None,
+) -> list[tuple[str, list[str]]]:
+    """根据任务 verification 策略和 category 解析验证步骤。
 
-    优先 compileOnly（快速编译检查），用 test 做单独测试。
-    若只有 build（含测试），则单步验证。
-    若 commands 段缺失，返回空列表（跳过验证，向后兼容）。
+    verification 值:
+      - "auto": 根据 category 推断 — backend-api→backend, frontend→frontend, test→none
+      - "backend": compileOnly + test（需要 profile.commands）
+      - "frontend": frontendCheck（如 npm run build），profile 未提供则跳过
+      - "none": 跳过
+
+    返回 [(label, [cmd, ...]), ...] 或空列表。
     """
-    commands = profile.get("commands", {})
-    if not commands:
+    mode = task.verification or "auto"
+    category = (task.category or "").lower()
+
+    # "auto" → 根据 category 推断
+    if mode == "auto":
+        if "frontend" in category:
+            mode = "frontend"
+        elif "backend" in category or "api" in category or "java" in category:
+            mode = "backend"
+        elif "test" in category:
+            mode = "none"
+        else:
+            mode = "backend"  # 默认按后端处理
+
+    if mode == "none":
         return []
 
-    steps: list[tuple[str, list[str]]] = []
-    has_compile_only = "compileOnly" in commands
-    has_build = "build" in commands
-    has_test = "test" in commands
+    commands = (profile or {}).get("commands", {})
 
-    if has_compile_only:
-        steps.append(("compile", commands["compileOnly"]))
-    elif has_build:
-        steps.append(("build", commands["build"]))
+    if mode == "backend":
+        steps: list[tuple[str, list[str]]] = []
+        has_compile_only = "compileOnly" in commands
+        has_build = "build" in commands
+        has_test = "test" in commands
+        if has_compile_only:
+            steps.append(("compile", commands["compileOnly"]))
+        elif has_build:
+            steps.append(("build", commands["build"]))
+        if has_test and has_compile_only:
+            steps.append(("test", commands["test"]))
+        return steps
 
-    # 仅当编译和测试分开时才追加独立测试步骤
-    if has_test and has_compile_only:
-        steps.append(("test", commands["test"]))
+    if mode == "frontend":
+        if "frontendCheck" in commands:
+            return [("frontend", commands["frontendCheck"])]
+        # 未配置前端验证命令，跳过
+        return []
 
-    return steps
+    return []
 
 
 def _run_verification_step(
     sandbox_path: Path, label: str, commands: list[str],
     timeout: int = VERIFY_TIMEOUT, env: dict[str, str] | None = None,
 ) -> tuple[bool, str]:
-    """在沙箱内执行一组验证命令。env 注入自定义环境变量（如 JAVA_HOME）。
+    """在沙箱内执行一组验证命令。
 
-    JAVA_HOME 通过 cmd /c \"set JAVA_HOME=... && ...\" 方式注入，
-    避免 subprocess env 传递在 Windows 上的不稳定性。
+    JAVA_HOME 通过 cmd /c 前缀注入（set + PATH），并做 pre-flight 检查。
+    shell=True 场景下仅用命令前缀注入，不通过 env dict（避免 cmd /c 下的交互问题）。
     """
-    merged_env = None
     java_home_prefix = ""
     if env:
-        merged_env = {**os.environ, **env}
-        jh = merged_env.get("JAVA_HOME", "")
+        jh = env.get("JAVA_HOME", "")
         if jh:
-            java_home_prefix = f'set "JAVA_HOME={jh}" && '
-            logger.debug(f"Verification: prepending JAVA_HOME={jh}")
+            # Pre-flight：验证 java.exe 可执行
+            if not _verify_java_home(jh):
+                logger.warning(f"JAVA_HOME pre-flight failed: {jh}")
+                return False, f"$ java -version\nJAVA_HOME 路径无效或 java.exe 不可执行: {jh}"
+            # 命令前缀注入 JAVA_HOME + PATH（%JAVA_HOME%\bin 追加到 PATH）
+            java_home_prefix = (
+                f'set "JAVA_HOME={jh}" && '
+                f'set "PATH={jh}\\bin;%PATH%" && '
+            )
+            logger.debug(f"Verification: JAVA_HOME={jh} (pre-flight OK)")
     for cmd in commands:
         # 安全检查：拒绝含 shell 元字符的命令（防 profile.yml 注入）
         if _UNSAFE_SHELL_RE.search(cmd):
@@ -704,7 +797,6 @@ def _run_verification_step(
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env=merged_env,
             )
             if proc.returncode != 0:
                 tail = proc.stderr.strip() or proc.stdout.strip()

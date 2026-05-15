@@ -138,6 +138,7 @@ stages:
   # ============================================================
   - id: phase5
     name: "编译与测试"
+    prerequisite: task_graph    # 前置：需要任务图执行产出代码
     recipe: recipes/steps/05-build.yaml
     max_turns: 60
     params:

@@ -23,6 +23,7 @@ class StageConfig:
     checkpoint_prompt: str = ""
     state_value: str = ""
     is_task_graph: bool = False
+    prerequisite: str = ""      # 前置阶段 id 或条件名（如 "task_graph_success"）
 
 
 @dataclass
@@ -44,7 +45,8 @@ class TaskConfig:
     sub_pipeline: bool = False  # 大模块内走 mini-pipeline（方案→编码→测试→审查）
     retry_limit: int = 2
     timeout_minutes: int = 15
-    sandbox_enabled: bool = False  # 任务是否在 git worktree 沙箱中执行（默认关闭，稳定后再开启）
+    sandbox_enabled: bool = False  # 任务是否在 git worktree 沙箱中执行
+    verification: str = "auto"  # "auto"|"backend"|"frontend"|"none" — 按任务类型选验证策略
 
 
 @dataclass
@@ -94,6 +96,7 @@ def load_pipeline(path: Path) -> PipelineConfig:
             checkpoint_prompt=item.get("checkpoint_prompt", ""),
             state_value=item["state_value"],
             is_task_graph=item.get("is_task_graph", False),
+            prerequisite=item.get("prerequisite", ""),
         ))
 
     logger.debug(f"loaded {len(stages)} stages from {path}")
@@ -206,6 +209,7 @@ def load_task_graph(path: Path) -> TaskGraphConfig:
             retry_limit=item.get("retry_limit", 2),
             timeout_minutes=item.get("timeout_minutes", 15),
             sandbox_enabled=item.get("sandbox_enabled", False),
+            verification=item.get("verification", "auto"),
         ))
 
     if not tasks:
