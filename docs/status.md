@@ -30,7 +30,7 @@
 | `multica_agent.py` | ✅ | v4.0 foundation | 本地 Mock Multica Native 入口 |
 | `pipeline.yaml` | ✅ | v3.8 | 12 阶段定义（Phase 5 prerequisite） |
 | Recipe 文件 (10) | ✅ | v3.1 | Phase 0-7 + task-template |
-| `tests/` (15 文件) | ✅ | v3.7 | 197 测试覆盖全模块 |
+| `tests/` (17 文件) | ✅ | v4.0 foundation | 219 collected / 213 selected（默认跳过 integration） |
 | `.github/workflows/test.yml` | ✅ | 完成 | GitHub Actions CI |
 
 ## 已修复 Bug

@@ -162,8 +162,8 @@
 
 | # | 任务 | 文件 | 状态 |
 |---|------|------|------|
-| T10 | Multica 守护进程入口 | `multica_agent.py` (新) | [ ] |
-| T11 | Standalone / Multica 双模式 | `pipeline.py` | [ ] |
+| T10 | Multica 守护进程入口 | `multica_agent.py` | ✅ Foundation 已完成；待真实 Multica 协议替换 |
+| T11 | Standalone / Multica 双模式 | `pipeline.py` + `pipeline/runner.py` | ✅ Foundation 已完成 |
 | T12 | 废弃模块清理 | `checkpoint.py` + `state.py` 阶段函数 + `src/` | [ ] |
 
 ---
