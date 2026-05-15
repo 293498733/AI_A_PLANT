@@ -151,6 +151,33 @@ def _resolve_output_path(template: str | None, P: Path, AD: Path, OUT: Path) -> 
     return Path(resolved)
 
 
+def _check_prerequisite(prerequisite: str, AD: Path, logger) -> bool:
+    """检查阶段前置条件是否满足。
+
+    'task_graph' — 任务图至少有一个任务产出代码（completed 或 code_produced）。
+    """
+    if prerequisite == "task_graph":
+        task_state_file = AD / "task_state.json"
+        if not task_state_file.exists():
+            logger.warning("task_state.json 不存在，视为任务图未执行")
+            return False
+        try:
+            import json
+            task_state = json.loads(task_state_file.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("task_state.json 无法解析")
+            return False
+        code_tasks = [
+            tid for tid, t in task_state.items()
+            if t.get("status") in ("completed", "code_produced")
+        ]
+        if not code_tasks:
+            logger.warning("task_state.json 中无 completed/code_produced 任务")
+            return False
+        return True
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AI 全流程开发管线",
@@ -350,6 +377,15 @@ def main():
             elapsed = time.time() - stage_start
             stage_times.append((stage.name, elapsed, "✅"))
             continue
+
+        # 前置条件检查
+        if stage.prerequisite:
+            if not _check_prerequisite(stage.prerequisite, AD, logger):
+                logger.warning(f"Stage {stage.name}: prerequisite '{stage.prerequisite}' not met, skipping")
+                write_stage(AD, stage.state_value)
+                elapsed = time.time() - stage_start
+                stage_times.append((stage.name, elapsed, "⚠️ 跳过"))
+                continue
 
         # Task Graph 阶段 — 路由到任务图执行器
         if stage.is_task_graph:

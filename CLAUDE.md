@@ -8,7 +8,7 @@
 
 ## 项目定位
 
-**AI Dev Flow** — AI 驱动的全流程软件开发管线，当前版本 **v3.7.0**。
+**AI Dev Flow** — AI 驱动的全流程软件开发管线，当前版本 **v3.8.0**。
 
 - **入口**: `python pipeline.py --project <目标项目路径>`
 - **技术栈**: Python 3.9+（编排）+ Goose CLI（AI 引擎）+ YAML Recipe（阶段/任务定义）
@@ -27,10 +27,10 @@
 | `recipes/steps/` | AI 阶段 Recipe（9 个 YAML） |
 | `tests/` | 单元 + 集成测试（15 个文件） |
 | `.claude/rules/` | 开发规则（Git 工作流、编码规范、环境要求） |
-| `.claude/plans/implementation-tracker.md` | **已实现 / 实施中 / 计划实现** 三段式进度追踪 |
-| `.claude/adrs/` | 架构决策记录 |
-| `.claude/status.md` | 模块状态、Bug 追踪、已知问题 |
 | `.claude/memory/` | 跨会话持久记忆 |
+| `docs/adrs/` | 架构决策记录 |
+| `docs/plans/implementation-tracker.md` | **已实现 / 实施中 / 计划实现** 三段式进度追踪 |
+| `docs/status.md` | 模块状态、Bug 追踪、已知问题 |
 
 ---
 
@@ -38,5 +38,5 @@
 
 - `ARCHITECTURE.md` — 架构设计文档
 - `README.md` — 用户手册
-- `.claude/plans/implementation-tracker.md` — **← 新会话首先看这个**：已实现/实施中/计划实现
-- `.claude/status.md` — 模块状态 + Bug 追踪
+- `docs/plans/implementation-tracker.md` — **← 新会话首先看这个**：已实现/实施中/计划实现
+- `docs/status.md` — 模块状态 + Bug 追踪

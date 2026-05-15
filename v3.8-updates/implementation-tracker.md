@@ -1,6 +1,6 @@
 # 实现追踪
 
-> 最后更新: 2026-05-13 | 当前版本: v3.2.0
+> 最后更新: 2026-05-15 | 当前版本: v3.8.0
 
 ---
 
@@ -28,12 +28,12 @@
 - 171 个测试（新增 18 个 watchdog + sandbox 测试）
 
 ### v3.3.0 — 并发上限控制 (2026-05-13)
-- `_execute_single_task()`：从主循环提取单任务执行逻辑（T7 前置）
+- `_execute_single_task()`：从主循环提取单任务执行逻辑
 - `ThreadPoolExecutor(max_workers)`：线程池控制 goose 并发数
 - `parallel_group` 分组：同组内并行，组间串行，`None` = 独立组
 - `TaskGraphConfig.max_workers`：可从 tasks.yaml 配置（默认 3）
 - `threading.Lock`：保护 state_mgr/git/snapshot 共享状态
-- 176 个测试（新增 5 个 _execute_single_task 测试 + 1 个 config 测试）
+- 176 个测试
 
 ### v3.4.0 — 单任务验证闭环 (2026-05-13)
 - `_get_verification_steps(profile)`：从 profile.commands 提取 compile → test 步骤
@@ -41,27 +41,54 @@
 - 验证流程：goose 成功 → 产出文件存在 → 编译 → 测试 → 全部通过才 sync
 - 验证失败：保留沙箱、即时反馈、走 error_handler 决策（重试/跳过/终止）
 - 向后兼容：profile 无 commands 段时跳过验证
-- 189 个测试（新增 13 个：6 个验证步骤 + 5 个 subprocess 执行 + 2 个集成测试）
+- 189 个测试
 
 ### v3.5.0 — goose 输出静默 (2026-05-13)
 - `executor._build_args(quiet=True)` → 追加 `-q` flag
 - `run_stage(quiet=True)` / `run_task(quiet=True)` 默认静默
 - `pipeline.py --verbose` 恢复全量输出
-- 全链路穿透：pipeline.py → execute_task_graph → _execute_single_task → run_task
 
 ### v3.6.0 — 子管线执行器 (2026-05-13)
 - `TaskConfig.sub_pipeline`：标记大模块任务走 mini-pipeline
 - `_run_sub_pipeline()`：4 阶段 goose session（方案 25% / 编码 40% / 测试 20% / 审查 15% turns）
-- 阶段间上下文累积（前一阶段产出追加到下一阶段 context）
-- 任一阶段失败立即停止，保留沙箱供排查
-- 191 个测试（新增 2 个 sub_pipeline 测试 + 1 个 config 测试）
+- 阶段间上下文累积，任一阶段失败立即停止保留沙箱
+- 191 个测试
 
 ### v3.7.0 — Bug 修复 + JDK 自动检测 (2026-05-13)
 - `detect_jdk(required_version)`：扫描系统 JDK 安装，匹配主版本返回 JAVA_HOME
-- `_run_verification_step(env=...)`：注入 JAVA_HOME 到验证子进程，解决沙箱编译失败
-- **修复**：产出文件缺失时不再标记 completed → 走 error_handler 决策（重试/跳过）
+- `_run_verification_step(env=...)`：注入 JAVA_HOME 到验证子进程
+- **修复**：产出文件缺失时不再标记 completed → 走 error_handler 决策
 - **修复**：`--new` 清理 task_state.json + tasks.yaml + 残留沙箱 worktree
-- 197 个测试（新增 5 个 detect_jdk 测试 + 1 个 _parse_javac_version 测试）
+- 197 个测试
+
+---
+
+## ✅ v3.8.0 可控性修复 (2026-05-15)
+
+> 来源：2026-05-14 进销存 WMS 项目实战 — 任务图执行 2 个任务失败 + 编译与测试 Goose 卡死
+
+| # | 改动 | 文件 | 优先级 | 状态 |
+|---|------|------|--------|------|
+| **D1** | JAVA_HOME pre-flight + PATH 注入加固 | `pipeline/task_graph.py` | P0 | ✅ |
+| **D2** | TaskConfig.verification + 按 category 选择验证策略 | `pipeline/config.py` + `task_graph.py` | P0 | ✅ |
+| **D3** | 三元任务状态：completed / code_produced / failed_no_output | `pipeline/task_state.py` + `task_graph.py` | P1 | ✅ |
+| **D4** | Phase 5 前置守卫：prerequisite 字段 + 启动前检查 | `pipeline.yaml` + `pipeline.py` | P1 | ✅ |
+| **D5** | Goose 循环检测：输出内容模式分析 | `pipeline/executor.py` | P2 | ✅ |
+| **D6** | 任务错误信息结构化 | `pipeline/task_graph.py` | P2 | ✅ |
+
+### 背景
+
+2026-05-14 进销存 WMS 项目运行全流程时暴露 3 层系统缺陷：
+
+1. **验证策略一刀切** — `_get_verification_steps()` 全局加载 `mvn compile`，前端 Vue 任务也被迫跑 Maven
+2. **任务状态二值化** — 代码已成功写入但验证步骤失败，task_state.json 报告 `output_files_produced: []` 和 `failed`
+3. **失败传播无阻断** — Phase 4 失败后 Phase 5 仍启动，Goose 同因卡死 4m36s
+
+### 实施顺序
+
+1. **P0 先修**（阻止失败传播）→ D1 + D2
+2. **P1 再补**（让失败可诊断）→ D3 + D4
+3. **P2 加固**（让异常可捕获）→ D5 + D6
 
 ---
 
@@ -106,13 +133,6 @@
 ---
 
 ## 📋 计划实现（待排期）
-
-### P1 — 执行能力增强
-- [x] **并发上限控制**（v3.3.0）：线程池限制同时执行的 goose 任务数（max_workers=3），同一 parallel_group 内可并行，超过上限的任务排队等空闲；让拆分粒度可以更细（10-20 turn），靠背压避免单任务触达 goose max actions 上限
-- [x] **单任务验证闭环**（v3.4.0）：沙箱内 goose 完成后 → 编译验证 → 测试验证 → 全部通过才 sync 回真实项目。编译/测试命令从 profile.yml commands 取，任一失败保留沙箱供排查，即时反馈不传染后续任务
-- [x] **goose 输出静默**（v3.5.0）：executor 默认传 `-q` 给 goose，仅显示模型回复，隐藏文件扫描噪音；加 `--verbose` flag 恢复全量输出
-- [x] **子管线执行器**（v3.6.0）：大模块内部走 mini-pipeline（方案→编码→测试→审查），`TaskConfig.sub_pipeline=True` 触发，4 阶段累计上下文，任一阶段失败保留沙箱
-- [x] **`--new` 白名单保留式清理**：遍历 `.ai-dev/` 一级条目，仅保留 `logs/`，其余全部删除。解决原来列 8 个文件名逐个删导致 `task_contexts/`、`summaries/`、`snapshot.json` 等遗漏的问题
 
 ### P2 — 质量体系
 - [ ] **多代理审查**：独立 goose session + 对立视角 prompt
