@@ -92,11 +92,47 @@
 
 ---
 
-## ⏸️ 搁置 — v4.0 升级改造
+---
+
+## 📋 v3.9.0 管线瘦身（待实施 — 2026-05-15 分析结论）
+
+> 来源：v3.8 修复后的深层问题 — Phase 5 AI 阶段不匹配 + CI 模式不可用于真实 CI
+> 方案：`docs/plans/v3.9-pipeline-slim.md`
+
+| # | 改动 | 文件 | 优先级 | 状态 |
+|---|------|------|--------|------|
+| **D7** | Phase 5 脚本化：goose session → 确定性编译+测试 | `pipeline.yaml` + `pipeline/runner.py` + `05-build.yaml` | P0 | [ ] |
+| **D8** | CI 退出码：区分环境失败和业务失败，非零退出 | `pipeline/error_handler.py` + `pipeline/runner.py` | P1 | [ ] |
+| **D9** | CI 摘要增强：x/y 阶段完成度 + 退出码解释 | `pipeline/runner.py` `_print_summary()` | P2 | [ ] |
+
+### 背景
+
+1. **Phase 5** 当前是 goose session（最多 60 turns），prompt 含"尝试修复编译错误"。实际上编译 30s + 测试 2min，其余时间 AI 在无任务上下文下猜测性改代码。Phase 5 应该是确定性验证，不是 AI 编码。
+2. **CI 模式** 对所有失败统一 `SKIP`，pipeline 始终 exit 0。环境问题（JAVA_HOME）和业务问题（代码 bug）被等同对待，无法用于真实 CI/CD。
+
+### 实施顺序
+
+1. **D7 P0** — 去掉 goose，直接 subprocess 跑编译+测试，输出报告
+2. **D8 P1** — 失败分类 + `sys.exit(1/2)`
+3. **D9 P2** — 摘要加完成度和退出码
+
+---
+
+## 🚧 v4.0 Multica Native 改造
 
 > 目标：从独立编排引擎 → Multica 标准执行层
-> 状态：已搁置，优先 P1 执行能力增强
+> 状态：已启动。Multica 尚未完成时，先用本地 Mock 管理层跑通 Native 调用方式。
 > 输入文档外部仍有：`D:\MyPrj\test\ai-dev-flow升级改造方案.md` + `D:\MyPrj\test\AI研发体系接入规范.md`
+
+### Foundation：可嵌入执行内核
+
+| # | 任务 | 文件 | 状态 |
+|---|------|------|------|
+| F1 | 稳定运行契约：RunRequest / RunEvent / RunResult | `pipeline/contracts.py` | ✅ |
+| F2 | 事件流接口 + JSONL 本地事件 sink | `pipeline/events.py` | ✅ |
+| F3 | run-scoped 本地存储 `.ai-dev/runs/<run_id>/` | `pipeline/stores.py` | ✅ |
+| F4 | CLI 主流程抽入 `PipelineRunner` | `pipeline/runner.py` + `pipeline.py` | ✅ |
+| F5 | 本地 Multica 模拟入口 | `multica_agent.py` | ✅ |
 
 ### 第 1 周：安全 + 多模型
 

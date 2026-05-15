@@ -1,0 +1,1009 @@
+#!/usr/bin/env python3
+"""AI 全流程开发管线 — 可嵌入 Runner。
+
+用法:
+    python pipeline.py                          # 交互式启动
+    python pipeline.py --project D:/MyPrj/xxx  # 指定项目路径
+    python pipeline.py --project ./foo --git-url https://github.com/user/repo.git  # 自动 clone
+    python pipeline.py --resume                # 从断点恢复
+    python pipeline.py --from-stage phase3     # 从指定阶段开始
+    python pipeline.py --dry-run               # 预览将执行的阶段
+"""
+
+import sys
+import os
+import time
+import argparse
+import hashlib
+import subprocess
+from pathlib import Path
+
+# 确保项目根目录在 sys.path 中
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from pipeline import __version__  # noqa: E402
+from pipeline.logger import init as init_logger  # noqa: E402
+from pipeline.config import load_pipeline, load_profile as load_project_profile, EmptyTaskGraphError  # noqa: E402
+from pipeline.state import (  # noqa: E402
+    read_stage, write_stage, clear_stage,
+    read_note, clear_note,
+)
+from pipeline.executor import check_goose, run_stage, GooseNotFound, detect_jdk, JdkNotFound  # noqa: E402
+from pipeline.checkpoint import confirm, ask_boolean, set_ci_mode as set_checkpoint_ci  # noqa: E402
+from pipeline.error_handler import handle_error, Action, set_ci_mode as set_error_ci  # noqa: E402
+from pipeline.task_graph import execute_task_graph  # noqa: E402
+from pipeline.git_ops import GitOps  # noqa: E402
+from pipeline.contracts import RunEvent, RunRequest, RunResult, StageRecord  # noqa: E402
+from pipeline.events import EventSink, NullEventSink, TeeEventSink  # noqa: E402
+from pipeline.stores import LocalRunStore  # noqa: E402
+
+SEPARATOR = "=" * 60
+
+
+def setup_project(project_path: str, git_url: str = "", git_branch: str = "",
+                  pull: bool = False) -> tuple[Path, Path, Path]:
+    p = Path(project_path).resolve()
+    if not p.exists():
+        if git_url:
+            print("项目目录不存在，从远程仓库 clone...")
+            print(f"  {git_url} → {p}")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            clone_cmd = ["git", "clone"]
+            if git_branch:
+                clone_cmd += ["-b", git_branch]
+            clone_cmd += [git_url, str(p)]
+            result = subprocess.run(
+                clone_cmd,
+                capture_output=True, text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"git clone 失败: {result.stderr.strip()}")
+            print("  clone 完成")
+        else:
+            raise FileNotFoundError(f"项目目录不存在: {p}")
+    elif pull:
+        _git = (p / ".git").exists()
+        if _git:
+            branch = git_branch or "main"
+            print(f"  拉取最新代码 ({branch})...")
+            result = subprocess.run(
+                ["git", "-C", str(p), "pull", "origin", branch],
+                capture_output=True, text=True,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                print(f"  警告: git pull 失败 — {result.stderr.strip()[:200]}")
+            else:
+                print(f"  pull 完成")
+
+    ad = p / ".ai-dev"
+    out = ad / "outputs"
+    ad.mkdir(exist_ok=True)
+    out.mkdir(exist_ok=True)
+
+    return p, ad, out
+
+
+def _clean_outputs(AD: Path, OUT: Path) -> None:
+    """白名单保留式清理：仅保留 logs/，其余 .ai-dev/ 一级条目全部删除。"""
+    import shutil as _shutil
+
+    KEEP = {"logs"}  # 历史运行日志，排查问题唯一依据
+    cleaned = []
+
+    for entry in AD.iterdir():
+        if entry.name in KEEP:
+            continue
+        try:
+            if entry.is_dir():
+                _shutil.rmtree(entry)
+            else:
+                entry.unlink()
+            cleaned.append(entry.name + ("/" if entry.is_dir() else ""))
+        except Exception as e:
+            print(f"  警告: 无法删除 {entry.name}: {e}")
+
+    if cleaned:
+        print(f"  已清除: {', '.join(sorted(cleaned))}")
+
+
+def expand_params(params: dict[str, str], P: Path, AD: Path, OUT: Path,
+                  req_path: str = "") -> dict[str, str]:
+    mapping = {
+        "{P}": str(P),
+        "{AD}": str(AD),
+        "{OUT}": str(OUT),
+        "{REQ}": req_path,
+    }
+    expanded = {}
+    for key, value in params.items():
+        for placeholder, replacement in mapping.items():
+            value = value.replace(placeholder, replacement)
+        expanded[key] = value
+    return expanded
+
+
+def _snapshot_outputs(OUT: Path) -> set[str]:
+    """记录当前 outputs/ 中的文件名集合。"""
+    if not OUT.exists():
+        return set()
+    return {f.name for f in OUT.iterdir() if f.is_file()}
+
+
+def _detect_extra_files(OUT: Path, before: set[str], expected: set[str]) -> list[str]:
+    """检测阶段执行后产生的非预期文件。"""
+    after = _snapshot_outputs(OUT)
+    new_files = after - before
+    extra = [f for f in new_files if f not in expected]
+    return extra
+
+
+def banner():
+    print(SEPARATOR)
+    print(f"  AI Dev Flow v{__version__}")
+    print("  需求 → 分析 → 方案 → 编码 → 审查 → 交付")
+    print(SEPARATOR)
+
+
+def _resolve_output_path(template: str | None, P: Path, AD: Path, OUT: Path) -> Path | None:
+    """将占位符路径解析为实际 Path。"""
+    if not template:
+        return None
+    resolved = expand_params({"_": template}, P, AD, OUT)["_"]
+    return Path(resolved)
+
+
+def _prepare_requirement_input(
+    req_file: str, AD: Path, logger, interactive: bool = False,
+) -> str:
+    """固化本轮需求原文，返回后续 recipe 应读取的 requirement-raw.md 路径。"""
+    raw_path = AD / "requirement-raw.md"
+
+    if req_file:
+        src = Path(req_file).resolve()
+        if not src.exists() or not src.is_file():
+            if interactive:
+                return _collect_requirement_interactively(
+                    AD, logger, f"需求文件不存在: {src}"
+                )
+            raise FileNotFoundError(f"需求文件不存在: {src}")
+        data = src.read_bytes()
+        if not data.strip():
+            if interactive:
+                return _collect_requirement_interactively(
+                    AD, logger, f"需求文件为空: {src}"
+                )
+            raise ValueError(f"需求文件为空: {src}")
+        if src != raw_path.resolve():
+            raw_path.write_bytes(data)
+            logger.info(f"需求原文已复制: {src} -> {raw_path}")
+        else:
+            logger.info(f"需求原文使用: {raw_path}")
+        return str(raw_path)
+
+    if interactive:
+        return _collect_requirement_interactively(AD, logger, "未指定需求文件")
+
+    if raw_path.exists() and raw_path.read_bytes().strip():
+        logger.info(f"未指定 --req，使用已有需求原文: {raw_path}")
+        return str(raw_path)
+
+    return ""
+
+
+def _collect_requirement_interactively(AD: Path, logger, reason: str = "") -> str:
+    """交互式需求输入向导，最终写入 .ai-dev/requirement-raw.md。"""
+    raw_path = AD / "requirement-raw.md"
+
+    while True:
+        has_existing = raw_path.exists() and bool(raw_path.read_bytes().strip())
+        print()
+        print(SEPARATOR)
+        print("  需求输入向导")
+        if reason:
+            print(f"  原因: {reason}")
+        print("  1. 输入另一个需求文件路径")
+        print("  2. 直接粘贴需求内容")
+        if has_existing:
+            print(f"  3. 使用已有需求原文: {raw_path}")
+        print("  q. 退出")
+        print(SEPARATOR)
+
+        choice = input("请选择 (默认 2): ").strip().lower()
+        if choice in ("", "2", "p", "paste"):
+            text = _read_requirement_from_stdin()
+            if not text.strip():
+                print("  需求内容不能为空，请重新输入。")
+                continue
+            raw_path.write_bytes(text.encode("utf-8"))
+            logger.info(f"需求原文已通过输入向导写入: {raw_path}")
+            return str(raw_path)
+
+        if choice in ("1", "f", "file"):
+            path = input("需求文件路径: ").strip().strip('"')
+            if not path:
+                print("  路径不能为空。")
+                continue
+            try:
+                return _prepare_requirement_input(path, AD, logger, interactive=True)
+            except (FileNotFoundError, ValueError) as e:
+                print(f"  {e}")
+                reason = str(e)
+                continue
+
+        if choice in ("3", "e", "existing") and has_existing:
+            logger.info(f"用户选择使用已有需求原文: {raw_path}")
+            return str(raw_path)
+
+        if choice in ("q", "quit", "exit"):
+            raise ValueError("未提供需求原文")
+
+        print("  无效选择，请输入 1 / 2 / 3 / q。")
+
+
+def _read_requirement_from_stdin() -> str:
+    """读取多行需求文本。输入单独一行 EOF 结束。"""
+    print()
+    print("请粘贴需求内容；输入单独一行 EOF 结束。")
+    lines: list[str] = []
+    while True:
+        try:
+            line = input()
+        except EOFError:
+            break
+        if line.strip() == "EOF":
+            break
+        lines.append(line)
+    return "\n".join(lines).strip() + ("\n" if lines else "")
+
+
+def _will_run_stage(pipeline, start_idx: int, stage_id: str) -> bool:
+    """判断从 start_idx 开始是否会执行指定阶段。"""
+    return any(stage.id == stage_id for stage in pipeline.stages[start_idx:])
+
+
+def _file_fingerprint(path: Path) -> tuple[int, int, str] | None:
+    """返回文件指纹，用于判断阶段产出是否由本轮刷新。"""
+    if not path.exists() or not path.is_file():
+        return None
+    stat = path.stat()
+    digest = ""
+    if stat.st_size <= 5 * 1024 * 1024:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return stat.st_mtime_ns, stat.st_size, digest
+
+
+def _output_refreshed(path: Path, before: tuple[int, int, str] | None) -> bool:
+    """输出文件必须新建或指纹发生变化，才算本轮产出。"""
+    after = _file_fingerprint(path)
+    if after is None:
+        return False
+    if before is None:
+        return True
+    return after != before
+
+
+def _check_prerequisite(prerequisite: str, AD: Path, logger) -> bool:
+    """检查阶段前置条件是否满足。
+
+    'task_graph' — 任务图至少有一个任务产出代码（completed 或 code_produced）。
+    """
+    if prerequisite == "task_graph":
+        task_state_file = AD / "task_state.json"
+        if not task_state_file.exists():
+            logger.warning("task_state.json 不存在，视为任务图未执行")
+            return False
+        try:
+            import json
+            task_state = json.loads(task_state_file.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("task_state.json 无法解析")
+            return False
+        code_tasks = [
+            tid for tid, t in task_state.items()
+            if t.get("status") in ("completed", "code_produced")
+        ]
+        if not code_tasks:
+            logger.warning("task_state.json 中无 completed/code_produced 任务")
+            return False
+        return True
+    return True
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    """构建 CLI 参数解析器。CLI 只是 RunRequest 的一种来源。"""
+    parser = argparse.ArgumentParser(
+        description="AI 全流程开发管线",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--project", "-p", help="目标项目路径")
+    parser.add_argument("--git-url", help="远程仓库地址（项目目录不存在时自动 clone）")
+    parser.add_argument("--git-branch", help="clone 时指定分支（配合 --git-url 使用）")
+    parser.add_argument("--req", "-r", help="需求文件路径")
+    parser.add_argument("--resume", action="store_true", help="从断点恢复")
+    parser.add_argument("--new", dest="new_run", action="store_true", help="全新运行，清除旧的 .ai-dev 产出")
+    parser.add_argument("--from-stage", dest="from_stage", help="从指定阶段开始")
+    parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际执行")
+    parser.add_argument("--debug", action="store_true", help="调试模式")
+    parser.add_argument("--verbose", action="store_true", help="goose 全量输出（默认 -q 静默，仅显示模型回复）")
+    parser.add_argument("--pull", action="store_true", help="启动前 git pull 拉取最新代码")
+    parser.add_argument("--ci", action="store_true", help="CI 模式，跳过所有人工交互，自动使用默认选择")
+    parser.add_argument("--version", action="version", version=f"ai-dev-flow v{__version__}")
+    return parser
+
+
+def request_from_args(args: argparse.Namespace) -> RunRequest:
+    """将 argparse Namespace 转为稳定的运行请求。"""
+    return RunRequest(
+        project_path=args.project or "",
+        git_url=args.git_url or "",
+        git_branch=args.git_branch or "",
+        req_file=args.req or "",
+        resume=args.resume,
+        new_run=args.new_run,
+        from_stage=args.from_stage or "",
+        dry_run=args.dry_run,
+        debug=args.debug,
+        verbose=args.verbose,
+        pull=args.pull,
+        ci=args.ci,
+        source="cli",
+    )
+
+
+def _namespace_from_request(request: RunRequest) -> argparse.Namespace:
+    """兼容旧执行流程的 Namespace 视图。"""
+    return argparse.Namespace(
+        project=request.project_path,
+        git_url=request.git_url,
+        git_branch=request.git_branch,
+        req=request.req_file,
+        resume=request.resume,
+        new_run=request.new_run,
+        from_stage=request.from_stage,
+        dry_run=request.dry_run,
+        debug=request.debug,
+        verbose=request.verbose,
+        pull=request.pull,
+        ci=request.ci,
+    )
+
+
+class PipelineRunner:
+    """可由 CLI 或 Multica 适配器调用的执行内核。"""
+
+    def __init__(
+        self,
+        event_sink: EventSink | None = None,
+        persist_local_events: bool = True,
+    ):
+        self.event_sink = event_sink or NullEventSink()
+        self.persist_local_events = persist_local_events
+
+    def run(self, request: RunRequest) -> RunResult:
+        args = _namespace_from_request(request)
+        try:
+            return _run_pipeline_from_args(
+                args=args,
+                request=request,
+                event_sink=self.event_sink,
+                persist_local_events=self.persist_local_events,
+            )
+        except Exception as e:
+            self.event_sink.emit(RunEvent.make(
+                request.run_id, "run.failed", error=str(e)
+            ))
+            return RunResult(
+                run_id=request.run_id,
+                status="failed",
+                exit_code=1,
+                message=str(e),
+            )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+    request = request_from_args(args)
+    result = PipelineRunner().run(request)
+    return result.exit_code
+
+
+def _emit(event_sink: EventSink, request: RunRequest, event_type: str, **payload) -> None:
+    event_sink.emit(RunEvent.make(request.run_id, event_type, **payload))
+
+
+def _fail_result(
+    request: RunRequest,
+    message: str,
+    exit_code: int = 1,
+    project_root: Path | None = None,
+    ai_dev_dir: Path | None = None,
+    outputs_dir: Path | None = None,
+) -> RunResult:
+    return RunResult(
+        run_id=request.run_id,
+        status="failed",
+        exit_code=exit_code,
+        project_root=project_root,
+        ai_dev_dir=ai_dev_dir,
+        outputs_dir=outputs_dir,
+        message=message,
+    )
+
+
+def _run_pipeline_from_args(
+    args: argparse.Namespace,
+    request: RunRequest,
+    event_sink: EventSink,
+    persist_local_events: bool = True,
+) -> RunResult:
+
+    set_checkpoint_ci(bool(args.ci))
+    set_error_ci(bool(args.ci))
+
+    banner()
+
+    project_path = args.project
+    if not project_path:
+        if args.ci:
+            message = "CI 模式需要指定 --project"
+            print(f"错误: {message}")
+            _emit(event_sink, request, "run.failed", error=message)
+            return _fail_result(request, message)
+        project_path = input("项目路径: ").strip().strip('"')
+        if not project_path:
+            message = "未指定项目路径"
+            print(f"错误: {message}")
+            _emit(event_sink, request, "run.failed", error=message)
+            return _fail_result(request, message)
+        request.project_path = project_path
+
+    P, AD, OUT = setup_project(project_path,
+                                git_url=args.git_url or "",
+                                git_branch=args.git_branch or "",
+                                pull=args.pull)
+    logger = init_logger(P, debug=args.debug)
+    logger.info(f"项目: {P}")
+
+    local_store: LocalRunStore | None = None
+    if persist_local_events:
+        local_store = LocalRunStore(AD)
+        local_store.write_request(request)
+        event_sink = TeeEventSink(event_sink, local_store.event_sink(request.run_id))
+
+    stage_records: list[StageRecord] = []
+
+    def _finish(result: RunResult) -> RunResult:
+        if local_store:
+            local_store.write_result(result)
+        terminal_event = {
+            "completed": "run.completed",
+            "aborted": "run.aborted",
+        }.get(result.status, "run.failed")
+        _emit(event_sink, request, terminal_event, status=result.status,
+              exit_code=result.exit_code, message=result.message)
+        return result
+
+    _emit(event_sink, request, "run.started", project_root=str(P), source=request.source)
+
+    # 检测项目画像是否存在，不存在则强制从 Phase 0 开始
+    profile_path = AD / "profile.yml"
+    profile_missing = not profile_path.exists()
+    if profile_missing:
+        logger.info("项目画像不存在，将从 Phase 0 项目初始化开始")
+        if not args.ci:
+            print()
+            print(SEPARATOR)
+            print("  项目画像文件 (profile.yml) 不存在。")
+            print("  将首先运行 Phase 0 — 自动扫描项目生成画像。")
+            print(SEPARATOR)
+
+    # 检测是否为全新需求提交
+    existing_stage = read_stage(AD)
+    has_outputs = list(OUT.glob("*")) if OUT.exists() else []
+
+    if args.new_run and not args.from_stage:
+        _clean_outputs(AD, OUT)
+    elif args.new_run and args.from_stage:
+        # from_stage 时不清除旧产出（需要之前阶段生成的文件）
+        logger.info("--from-stage 模式，不清除旧产出")
+    elif has_outputs and not existing_stage:
+        print()
+        print(SEPARATOR)
+        print("  检测到旧的 .ai-dev 产出文件:")
+        for f in sorted(has_outputs):
+            print(f"    - {f.name}")
+        print(SEPARATOR)
+        if ask_boolean("清除旧文件开始全新运行?", default=True):
+            _clean_outputs(AD, OUT)
+        else:
+            print("保留旧文件，继续执行（可能覆盖同名文件）")
+
+    if request.requirement_text and not args.req:
+        raw_req = AD / "requirement-raw.md"
+        raw_req.write_text(request.requirement_text.strip() + "\n", encoding="utf-8")
+        args.req = str(raw_req)
+        logger.info(f"需求原文已从 RunRequest 写入: {raw_req}")
+
+    # 验证 goose CLI
+    try:
+        check_goose()
+    except GooseNotFound as e:
+        logger.error(str(e))
+        return _finish(_fail_result(
+            request, str(e), project_root=P, ai_dev_dir=AD, outputs_dir=OUT
+        ))
+
+    # JDK 自动检测（供阶段级 goose 子进程使用）
+    stage_env: dict[str, str] = {}
+    try:
+        _profile = load_project_profile(profile_path) if profile_path.exists() else None
+        if _profile:
+            jdk_required = int(_profile.get("backend", {}).get("jdk", {}).get("compileRelease", 17))
+        else:
+            jdk_required = 17
+        jdk_home = detect_jdk(jdk_required)
+        stage_env["JAVA_HOME"] = jdk_home
+        logger.info(f"JDK {jdk_required} detected: {jdk_home}")
+        print(f"  JDK 检测: {jdk_home}")
+    except JdkNotFound as e:
+        logger.warning(str(e))
+    except Exception:
+        pass  # profile 可能还不存在，Phase 0 会生成
+
+    # 检查 API Key
+    api_key = os.environ.get("CUSTOM_DEEPSEEK_API_KEY")
+    if not api_key:
+        logger.warning("未设置 CUSTOM_DEEPSEEK_API_KEY 环境变量")
+        logger.warning("请运行: set CUSTOM_DEEPSEEK_API_KEY=你的key")
+        if not ask_boolean("是否继续? (某些阶段可能无法正常工作)", default=False):
+            return _finish(_fail_result(
+                request, "未设置 CUSTOM_DEEPSEEK_API_KEY",
+                project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+            ))
+
+    # 加载管线配置
+    pipeline_config_path = PROJECT_ROOT / "pipeline.yaml"
+    pipeline = load_pipeline(pipeline_config_path)
+
+    # 处理需求文件
+    req_file = args.req
+    if req_file:
+        req_file = str(Path(req_file).resolve())
+    else:
+        note = read_note(AD)
+        if note:
+            print()
+            print(SEPARATOR)
+            print("  上次运行的笔记:")
+            print(f"  {note}")
+            print(SEPARATOR)
+            choice = input("清除笔记并继续? (Y/n/保留笔记继续=q): ").strip().lower()
+            if choice in ("", "y", "yes"):
+                clear_note(AD)
+            elif choice in ("q", "keep"):
+                logger.info("保留笔记，继续执行")
+            else:
+                return _finish(_fail_result(
+                    request, "用户取消清除运行笔记",
+                    project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+                ))
+
+        if not args.ci:
+            req_file = input("需求文件路径 (留空进入填写向导): ").strip().strip('"')
+        if req_file:
+            req_file = str(Path(req_file).resolve())
+
+    # 确定起始阶段
+    current_state = read_stage(AD)
+    if args.from_stage:
+        start_idx = 0
+        for i, s in enumerate(pipeline.stages):
+            if s.id == args.from_stage:
+                start_idx = i
+                break
+        logger.info(f"从指定阶段开始: {pipeline.stages[start_idx].name}")
+    elif profile_missing:
+        start_idx = 0  # 强制从 Phase 0 开始
+        logger.info("从 Phase 0 项目初始化开始（profile.yml 不存在）")
+    elif current_state:
+        start_idx = pipeline.find_resume_index(current_state)
+        if start_idx >= len(pipeline.stages):
+            logger.info("管线已全部完成!")
+            clear_stage(AD)
+            return _finish(RunResult(
+                run_id=request.run_id,
+                status="completed",
+                exit_code=0,
+                project_root=P,
+                ai_dev_dir=AD,
+                outputs_dir=OUT,
+                message="管线已全部完成",
+            ))
+        if start_idx > 0:
+            prev = pipeline.stages[start_idx - 1]
+            logger.info(f"从断点恢复: {prev.name} 已完成 → {pipeline.stages[start_idx].name}")
+        else:
+            logger.info("开始全新管线")
+    else:
+        start_idx = 0
+        logger.info("开始全新管线")
+
+    try:
+        if req_file or _will_run_stage(pipeline, start_idx, "phase1"):
+            req_file = _prepare_requirement_input(
+                req_file or "", AD, logger,
+                interactive=(not args.ci and _will_run_stage(pipeline, start_idx, "phase1")),
+            )
+    except (FileNotFoundError, ValueError) as e:
+        logger.error(str(e))
+        print(f"错误: {e}")
+        return _finish(_fail_result(
+            request, str(e), project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+        ))
+
+    if _will_run_stage(pipeline, start_idx, "phase1") and not req_file:
+        msg = "Phase 1 需要需求原文。请使用 --req 指定需求文件，或提供 .ai-dev/requirement-raw.md。"
+        logger.error(msg)
+        print(f"错误: {msg}")
+        return _finish(_fail_result(
+            request, msg, project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+        ))
+
+    if args.dry_run:
+        print()
+        print("预览模式 — 将执行以下阶段:")
+        for i, s in enumerate(pipeline.stages[start_idx:], start=start_idx):
+            marker = "[检查点]" if s.is_checkpoint else "[AI阶段]"
+            print(f"  {i+1:2d}. {marker} {s.name}")
+        return _finish(RunResult(
+            run_id=request.run_id,
+            status="completed",
+            exit_code=0,
+            project_root=P,
+            ai_dev_dir=AD,
+            outputs_dir=OUT,
+            message="dry-run completed",
+        ))
+
+    # 执行管线 — 记录各阶段耗时
+    total = len(pipeline.stages)
+    stage_times: list[tuple[str, float, str]] = []  # (name, elapsed_sec, status)
+    pipeline_start = time.time()
+
+    def _record_stage(stage, elapsed: float, label: str,
+                      status: str, message: str = "") -> None:
+        stage_times.append((stage.name, elapsed, label))
+        stage_records.append(StageRecord(
+            id=stage.id,
+            name=stage.name,
+            status=status,
+            elapsed_seconds=elapsed,
+            message=message,
+        ))
+        _emit(event_sink, request, "stage.finished",
+              stage_id=stage.id, name=stage.name, status=status,
+              elapsed_seconds=elapsed, message=message)
+
+    _tasks_snapshot = ""  # 任务图执行后保护 tasks.yaml 不被后续阶段覆盖
+
+    for i in range(start_idx, total):
+        stage = pipeline.stages[i]
+        progress = f"[{i+1}/{total}]"
+        stage_start = time.time()
+        _emit(event_sink, request, "stage.started",
+              stage_id=stage.id, name=stage.name, index=i + 1, total=total)
+
+        if stage.is_checkpoint:
+            # 查找前一个阶段生成的产出文件作为预览
+            preview_file = None
+            for j in range(i - 1, -1, -1):
+                prev_stage = pipeline.stages[j]
+                if prev_stage.output_file:
+                    preview_file = _resolve_output_path(prev_stage.output_file, P, AD, OUT)
+                    break
+
+            prompt_text = expand_params({"_": stage.checkpoint_prompt}, P, AD, OUT, req_file or "")["_"]
+            confirm(f"{progress} {stage.name}", prompt_text, preview_file)
+            write_stage(AD, stage.state_value)
+            elapsed = time.time() - stage_start
+            _record_stage(stage, elapsed, "✅", "completed")
+            continue
+
+        # 前置条件检查
+        if stage.prerequisite:
+            if not _check_prerequisite(stage.prerequisite, AD, logger):
+                logger.warning(f"Stage {stage.name}: prerequisite '{stage.prerequisite}' not met, skipping")
+                write_stage(AD, stage.state_value)
+                elapsed = time.time() - stage_start
+                _record_stage(stage, elapsed, "⚠️ 跳过", "skipped",
+                              f"prerequisite '{stage.prerequisite}' not met")
+                continue
+
+        # Task Graph 阶段 — 路由到任务图执行器
+        if stage.is_task_graph:
+            expanded_params = expand_params(stage.params, P, AD, OUT, req_file or "")
+            tasks_file = Path(expanded_params["tasks_file"])
+            if not tasks_file.exists():
+                logger.error(f"tasks.yaml 不存在: {tasks_file}")
+                action = handle_error(AD)
+                if action == Action.SKIP:
+                    write_stage(AD, stage.state_value)
+                    _record_stage(stage, 0, "⚠️ 跳过", "skipped", "tasks.yaml 不存在")
+                    continue
+                else:
+                    return _finish(_fail_result(
+                        request, f"tasks.yaml 不存在: {tasks_file}",
+                        project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+                    ))
+
+            print()
+            print(SEPARATOR)
+            print(f"  {progress} {stage.name}")
+            print(SEPARATOR)
+
+            task_start = time.time()
+            try:
+                success, _ = execute_task_graph(
+                    project_root=P,
+                    ai_dev_dir=AD,
+                    tasks_file=tasks_file,
+                    profile_path=AD / "profile.yml",
+                    task_recipe=expanded_params.get("task_recipe",
+                        "recipes/steps/task-template.yaml"),
+                    quiet=not args.verbose,
+                )
+            except EmptyTaskGraphError as e:
+                logger.error(f"任务图加载失败: {e}")
+                print("\n  ❌ 任务图为空，无法执行。")
+                print(f"  {e}")
+                action = handle_error(AD)
+                if action == Action.SKIP:
+                    elapsed = time.time() - task_start
+                    _record_stage(stage, elapsed, "❌ 空任务图", "skipped", str(e))
+                    continue
+                else:
+                    return _finish(_fail_result(
+                        request, f"任务图为空: {e}",
+                        project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+                    ))
+
+            if success:
+                write_stage(AD, stage.state_value)
+                elapsed = time.time() - task_start
+                mins, secs = divmod(int(elapsed), 60)
+                logger.info(f"任务图执行完成 ({mins}m{secs}s)")
+                _record_stage(stage, elapsed, "✅", "completed")
+                _tasks_snapshot = tasks_file.read_text(encoding="utf-8") if tasks_file.exists() else ""
+                continue
+            else:
+                action = handle_error(AD)
+                if action == Action.RETRY:
+                    continue
+                elif action == Action.NOTE_EXIT:
+                    return _finish(RunResult(
+                        run_id=request.run_id, status="aborted", exit_code=0,
+                        project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+                        stages=stage_records, message="用户写入笔记并退出",
+                    ))
+                elif action == Action.SKIP:
+                    write_stage(AD, stage.state_value)
+                    elapsed = time.time() - task_start
+                    _record_stage(stage, elapsed, "⚠️ 跳过", "skipped", "task graph failed")
+                    _tasks_snapshot = tasks_file.read_text(encoding="utf-8") if tasks_file.exists() else ""
+                    continue
+                else:
+                    return _finish(_fail_result(
+                        request, "任务图执行失败",
+                        project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+                    ))
+
+        # AI 阶段 — 执行前恢复被覆盖的 tasks.yaml
+        if _tasks_snapshot and tasks_file.exists():
+            current = tasks_file.read_text(encoding="utf-8")
+            if current != _tasks_snapshot:
+                logger.warning("tasks.yaml was modified by a later phase, restoring original")
+                tasks_file.write_text(_tasks_snapshot, encoding="utf-8")
+
+        expanded_params = expand_params(stage.params, P, AD, OUT, req_file or "")
+        recipe_path = str(PROJECT_ROOT / stage.recipe)
+        before_files = _snapshot_outputs(OUT)
+
+        # 预期文件集合
+        expected_names = set()
+        expected_paths: list[Path] = []
+        if stage.output_file:
+            expected_path = _resolve_output_path(stage.output_file, P, AD, OUT)
+            if expected_path:
+                expected_names.add(expected_path.name)
+                expected_paths.append(expected_path)
+
+        while True:
+            expected_before = {
+                path: _file_fingerprint(path)
+                for path in expected_paths
+            }
+            print()
+            print(SEPARATOR)
+            print(f"  {progress} {stage.name}")
+            print(SEPARATOR)
+            print(f"  启动 goose (max {stage.max_turns} turns)...")
+            print(SEPARATOR)
+
+            try:
+                result = run_stage(
+                    recipe=recipe_path,
+                    max_turns=stage.max_turns,
+                    params=expanded_params,
+                    cwd=P,
+                    quiet=not args.verbose,
+                    env=stage_env or None,
+                )
+
+                print()
+
+                if result.returncode == 0:
+                    # 验证预期输出文件
+                    missing = []
+                    if stage.output_file:
+                        output_path = _resolve_output_path(stage.output_file, P, AD, OUT)
+                        if output_path and not output_path.exists():
+                            logger.warning(f"未生成预期文件: {output_path}")
+                            missing.append(output_path.name)
+
+                    # 检测额外产出文件
+                    extra = _detect_extra_files(OUT, before_files, expected_names)
+                    if extra:
+                        logger.warning(f"检测到非预期产出文件: {extra}")
+                        print(f"  [注意] AI 额外生成了非预期文件: {', '.join(extra)}")
+
+                    if missing:
+                        logger.error(f"缺少预期文件: {missing}")
+                        action = handle_error(AD)
+                        if action == Action.RETRY:
+                            continue
+                        elif action == Action.NOTE_EXIT:
+                            return _finish(RunResult(
+                                run_id=request.run_id, status="aborted", exit_code=0,
+                                project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+                                stages=stage_records, message="用户写入笔记并退出",
+                            ))
+                        elif action == Action.SKIP:
+                            write_stage(AD, stage.state_value)
+                            elapsed = time.time() - stage_start
+                            _record_stage(stage, elapsed, "⚠️ 跳过", "skipped",
+                                          f"缺少预期文件: {missing}")
+                            break
+                    else:
+                        stale = [
+                            path.name for path in expected_paths
+                            if not _output_refreshed(path, expected_before.get(path))
+                        ]
+                        if stale:
+                            logger.error(
+                                f"预期文件未在本轮刷新，疑似复用旧产出: {stale}"
+                            )
+                            print(
+                                "  [错误] 预期产出未在本轮刷新，"
+                                f"疑似复用旧文件: {', '.join(stale)}"
+                            )
+                            action = handle_error(AD)
+                            if action == Action.RETRY:
+                                continue
+                            elif action == Action.NOTE_EXIT:
+                                return _finish(RunResult(
+                                    run_id=request.run_id, status="aborted", exit_code=0,
+                                    project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+                                    stages=stage_records, message="用户写入笔记并退出",
+                                ))
+                            elif action == Action.SKIP:
+                                write_stage(AD, stage.state_value)
+                                elapsed = time.time() - stage_start
+                                _record_stage(stage, elapsed, "⚠️ 跳过", "skipped",
+                                              f"预期文件未刷新: {stale}")
+                                break
+                            else:
+                                return _finish(_fail_result(
+                                    request, f"预期文件未刷新: {stale}",
+                                    project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+                                ))
+                        write_stage(AD, stage.state_value)
+                        elapsed = time.time() - stage_start
+                        mins = int(elapsed // 60)
+                        secs = int(elapsed % 60)
+                        logger.info(f"{stage.name} — 完成 ({mins}m{secs}s)")
+                        _record_stage(stage, elapsed, "✅", "completed")
+                        break
+                else:
+                    action = handle_error(AD)
+                    if action == Action.RETRY:
+                        continue
+                    elif action == Action.NOTE_EXIT:
+                        return _finish(RunResult(
+                            run_id=request.run_id, status="aborted", exit_code=0,
+                            project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+                            stages=stage_records, message="用户写入笔记并退出",
+                        ))
+                    elif action == Action.SKIP:
+                        write_stage(AD, stage.state_value)
+                        elapsed = time.time() - stage_start
+                        _record_stage(stage, elapsed, "⚠️ 跳过", "skipped",
+                                      f"goose returncode={result.returncode}")
+                        break
+
+            except Exception as e:
+                logger.error(f"执行异常: {e}")
+                action = handle_error(AD)
+                if action == Action.RETRY:
+                    continue
+                elif action == Action.NOTE_EXIT:
+                    return _finish(RunResult(
+                        run_id=request.run_id, status="aborted", exit_code=0,
+                        project_root=P, ai_dev_dir=AD, outputs_dir=OUT,
+                        stages=stage_records, message="用户写入笔记并退出",
+                    ))
+                elif action == Action.SKIP:
+                    write_stage(AD, stage.state_value)
+                    elapsed = time.time() - stage_start
+                    _record_stage(stage, elapsed, "⚠️ 异常", "skipped", str(e))
+                    break
+
+    # 全部完成 — 推送所有提交
+    try:
+        git = GitOps(P)
+        git.push()
+    except RuntimeError:
+        pass  # 非 git 仓库，跳过
+
+    total_elapsed = time.time() - pipeline_start
+    clear_stage(AD)
+
+    print()
+    print(SEPARATOR)
+    print("  管线全部完成!")
+    print(SEPARATOR)
+    _print_summary(stage_times, total_elapsed, OUT)
+    return _finish(RunResult(
+        run_id=request.run_id,
+        status="completed",
+        exit_code=0,
+        project_root=P,
+        ai_dev_dir=AD,
+        outputs_dir=OUT,
+        stages=stage_records,
+        message="管线全部完成",
+    ))
+
+
+def _print_summary(stage_times: list[tuple[str, float, str]], total_elapsed: float, OUT: Path) -> None:
+    """打印运行摘要。"""
+    total_m = int(total_elapsed // 60)
+    total_s = int(total_elapsed % 60)
+    print()
+    print(SEPARATOR)
+    print(f"  运行摘要  (总耗时 {total_m}m{total_s}s)")
+    print(SEPARATOR)
+    for name, elapsed, status in stage_times:
+        mins = int(elapsed // 60)
+        secs = int(elapsed % 60)
+        print(f"  {status}  {name:<12s}  {mins}m{secs}s")
+    print(SEPARATOR)
+
+    # 列出最终产出物
+    if OUT.exists():
+        outputs = sorted(OUT.iterdir())
+        if outputs:
+            print()
+            print("  最终产出物:")
+            for f in outputs:
+                if f.is_file():
+                    size_kb = f.stat().st_size // 1024
+                    print(f"    - {f.name} ({size_kb}KB)")
+            print()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

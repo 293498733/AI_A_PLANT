@@ -22,7 +22,12 @@
 | `pipeline/knowledge_accumulator.py` | ✅ | 完成 | KnowledgeAccumulator |
 | `pipeline/sandbox.py` | ✅ | v3.2 | Git worktree 沙箱管理器 |
 | `pipeline/watchdog.py` | ✅ | v3.2 | 进程看门狗（taskkill /F /T） |
-| `pipeline.py` | ✅ | v3.8 | CLI 入口（前置守卫） |
+| `pipeline/contracts.py` | ✅ | v4.0 foundation | Multica Native 运行契约 |
+| `pipeline/events.py` | ✅ | v4.0 foundation | RunEvent sink + JSONL 本地事件流 |
+| `pipeline/stores.py` | ✅ | v4.0 foundation | `.ai-dev/runs/<run_id>/` 本地运行存储 |
+| `pipeline/runner.py` | ✅ | v4.0 foundation | 可嵌入 PipelineRunner 执行内核 |
+| `pipeline.py` | ✅ | v4.0 foundation | 薄 CLI 入口 |
+| `multica_agent.py` | ✅ | v4.0 foundation | 本地 Mock Multica Native 入口 |
 | `pipeline.yaml` | ✅ | v3.8 | 12 阶段定义（Phase 5 prerequisite） |
 | Recipe 文件 (10) | ✅ | v3.1 | Phase 0-7 + task-template |
 | `tests/` (15 文件) | ✅ | v3.7 | 197 测试覆盖全模块 |
@@ -59,3 +64,6 @@
 | **JAVA_HOME 注入不稳定** | ✅ v3.8 已修复 | shell=True + env dict + set 三重注入仍可能失效。加 pre-flight check + PATH 注入 |
 | **阶段间无前置守卫** | ✅ v3.8 已修复 | Phase 4 失败后 Phase 5 仍启动。pipeline.yaml 加 prerequisite 字段 |
 | Goose 语义卡死 | ✅ v3.8 已修复 | 心跳仅检测频率不检测内容模式。加连续重复输出检测 |
+| Phase 5 是 AI 阶段非验证阶段 | 🔴 **v3.9 计划** | 05-build.yaml 含"尝试修复错误"指令，60 turns 浪费在猜测性修改。应脚本化 |
+| CI 模式静默跳过 | 🔴 **v3.9 计划** | 环境失败和业务失败统一 SKIP，pipeline 始终 exit 0。需区分分类 + 非零退出 |
+| CI 摘要无完成度 | 🟡 v3.9 计划 | 摘要仅列阶段耗时，无 x/y 完成度，无退出码解释 |

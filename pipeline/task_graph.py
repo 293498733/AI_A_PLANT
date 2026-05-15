@@ -760,6 +760,18 @@ def _resolve_verification_steps(
     return []
 
 
+def _get_verification_steps(profile: dict | None) -> list[tuple[str, list[str]]]:
+    """后向兼容：旧调用默认按后端任务解析验证步骤。"""
+    task = TaskConfig(
+        id="_verification_probe",
+        name="_verification_probe",
+        description="",
+        category="backend",
+        verification="backend",
+    )
+    return _resolve_verification_steps(task, profile)
+
+
 def _run_verification_step(
     sandbox_path: Path, label: str, commands: list[str],
     timeout: int = VERIFY_TIMEOUT, env: dict[str, str] | None = None,

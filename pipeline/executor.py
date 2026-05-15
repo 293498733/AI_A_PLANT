@@ -1,6 +1,8 @@
 """goose CLI 调用封装 — 实时输出、看门狗超时、日志捕获。"""
 
 import os
+import csv
+import sys
 import time
 import shutil
 import logging
@@ -14,6 +16,9 @@ from pipeline.watchdog import ProcessWatchdog
 logger = logging.getLogger("ai-dev-flow")
 
 HEARTBEAT_INTERVAL = 60
+DEFAULT_STAGE_TIMEOUT_MINUTES = 30
+DEFAULT_IDLE_TIMEOUT_SECONDS = 10 * 60
+IDLE_TIMEOUT_RETURN_CODE = -2
 
 
 class GooseError(Exception):
@@ -109,16 +114,26 @@ def _probe_process(pid: int) -> str:
             ["tasklist", "/FI", f"PID eq {pid}", "/V", "/FO", "CSV", "/NH"],
             capture_output=True, text=True, timeout=5,
         )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip().splitlines()
+            msg = detail[-1] if detail else f"exit={result.returncode}"
+            return f"state=probe_error detail={msg[:80]}"
         line = result.stdout.strip()
         if not line or str(pid) not in line:
             return "state=exited"
-        parts = [p.strip().strip('"') for p in line.split(",")]
+        rows = list(csv.reader(line.splitlines()))
+        if not rows:
+            return "state=parse_error"
+        parts = [p.strip() for p in rows[0]]
         if len(parts) < 8:
             return "state=parse_error"
-        # parts: 0=Name, 1=PID, 2=Session, 3=Session#, 4=Mem, 5=Status, 6=User, 7=CPU_Time
-        status = parts[5]
-        mem = parts[4]
-        cpu_time = parts[7] if len(parts) > 7 else "N/A"
+        # tasklist /V CSV columns:
+        # 0=Name, 1=PID, 2=Session, 3=Session#, 4=Mem, 5=Status,
+        # 6=User, 7=CPU_Time, 8=WindowTitle. Use csv.reader because
+        # localized memory values may contain commas, e.g. "1,428 K".
+        status = parts[5] if len(parts) > 5 else "unknown"
+        mem = parts[4] if len(parts) > 4 else "unknown"
+        cpu_time = parts[7] if len(parts) > 7 else "unknown"
         classification = _classify_state(status, cpu_time)
         return f"state={classification} status={status} mem={mem} cpu_time={cpu_time}"
     except Exception:
@@ -126,12 +141,45 @@ def _probe_process(pid: int) -> str:
 
 
 def _classify_state(status: str, cpu_time: str) -> str:
-    """基于进程状态和 CPU 时间推断卡死原因。"""
-    if status == "Not Responding":
-        return "IO_wait(API_hang?)"
-    if cpu_time and cpu_time != "0:00:00":
-        return "CPU_busy(loop?)"
-    return "idle"
+    """基于进程状态做保守诊断，避免把历史 CPU 时间误判成循环。"""
+    normalized_status = (status or "").strip().lower()
+    if normalized_status == "not responding":
+        return "not_responding"
+    if _cpu_time_to_seconds(cpu_time) > 0:
+        return "running_cpu_seen"
+    return "running_no_cpu_seen"
+
+
+def _cpu_time_to_seconds(cpu_time: str) -> int:
+    """将 tasklist CPU Time 转为秒。解析失败返回 0。"""
+    if not cpu_time:
+        return 0
+    parts = cpu_time.strip().split(":")
+    if len(parts) != 3:
+        return 0
+    try:
+        hours, minutes, seconds = (int(p) for p in parts)
+    except ValueError:
+        return 0
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _kill_process_tree(pid: int) -> None:
+    """强制终止进程树。用于静默超时和循环检测。"""
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True, text=True, timeout=10,
+            )
+        except Exception:
+            logger.exception("taskkill failed")
+    else:
+        try:
+            import signal
+            os.kill(pid, signal.SIGKILL)
+        except Exception:
+            logger.exception("kill failed")
 
 
 def _run_with_watchdog(
@@ -140,6 +188,7 @@ def _run_with_watchdog(
     timeout_seconds: int | None,
     on_timeout=None,
     env: dict[str, str] | None = None,
+    idle_timeout_seconds: int | None = None,
 ) -> subprocess.CompletedProcess:
     """核心执行逻辑：线程化 I/O + 可选的看门狗超时控制。
 
@@ -152,6 +201,7 @@ def _run_with_watchdog(
     stdout_lines: list[str] = []
     heartbeat = {"last": time.time()}
     recent_stderr: deque[str] = deque(maxlen=10)  # 最近 stderr 行，用于循环检测
+    idle_kill = {"triggered": False, "elapsed": 0, "info": ""}
 
     def _read_stdout():
         for raw_line in proc.stdout:
@@ -194,6 +244,19 @@ def _run_with_watchdog(
                 logger.warning(
                     f"Goose has produced no output for {int(elapsed)}s (pid={proc.pid}, {info})"
                 )
+            if idle_timeout_seconds and elapsed > idle_timeout_seconds:
+                info = _probe_process(proc.pid)
+                idle_kill["triggered"] = True
+                idle_kill["elapsed"] = int(elapsed)
+                idle_kill["info"] = info
+                logger.critical(
+                    f"Goose idle timeout after {int(elapsed)}s without output "
+                    f"(limit={idle_timeout_seconds}s, pid={proc.pid}, {info}); killing process tree"
+                )
+                _kill_process_tree(proc.pid)
+                if proc.poll() is None:
+                    proc.kill()
+                break
             # 循环检测：最近 N 行 stderr 全部相同 → 卡死在重试循环
             if len(recent_stderr) >= LOOP_DETECT_THRESHOLD:
                 recent_list = list(recent_stderr)
@@ -204,9 +267,14 @@ def _run_with_watchdog(
                             f"Goose appears stuck in a retry loop (same stderr {LOOP_DETECT_THRESHOLD}x): "
                             f"{recent_list[-1][:200]}"
                         )
-                        proc.kill()
+                        _kill_process_tree(proc.pid)
+                        if proc.poll() is None:
+                            proc.kill()
                         break
-            time.sleep(min(HEARTBEAT_INTERVAL, 30))
+            sleep_for = min(HEARTBEAT_INTERVAL, 30)
+            if idle_timeout_seconds:
+                sleep_for = min(sleep_for, max(0.2, idle_timeout_seconds / 4))
+            time.sleep(sleep_for)
 
     heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
     heartbeat_thread.start()
@@ -242,6 +310,17 @@ def _run_with_watchdog(
             stdout="", stderr=f"Process killed by watchdog after {timeout_seconds}s"
         )
 
+    if idle_kill["triggered"]:
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=IDLE_TIMEOUT_RETURN_CODE,
+            stdout="",
+            stderr=(
+                f"Process killed after {idle_kill['elapsed']}s without goose output "
+                f"(idle limit {idle_timeout_seconds}s; {idle_kill['info']})"
+            ),
+        )
+
     if proc.returncode != 0:
         logger.error(f"goose exited with code {proc.returncode}")
 
@@ -258,13 +337,16 @@ def run_stage(
     max_turns: int,
     params: dict[str, str],
     cwd: Path | None = None,
-    timeout_minutes: int | None = None,
+    timeout_minutes: int | None = DEFAULT_STAGE_TIMEOUT_MINUTES,
     quiet: bool = True,
     env: dict[str, str] | None = None,
+    idle_timeout_seconds: int | None = DEFAULT_IDLE_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess:
     """执行 goose recipe 阶段。
 
-    timeout_minutes=None 时无超时限制（阶段级执行），>0 时启用心跳看门狗。
+    默认启用阶段级硬超时和静默超时，防止 goose 阶段无限等待。
+    timeout_minutes=None 或 0 表示禁用硬超时。
+    idle_timeout_seconds=None 或 0 表示禁用静默超时。
     quiet=True 时传 -q 给 goose，隐藏文件扫描噪音，仅显示模型回复。
     env 注入自定义环境变量（如 JAVA_HOME）。
     """
@@ -276,7 +358,10 @@ def run_stage(
     logger.debug(f"stage params: {params}")
 
     timeout_secs = (timeout_minutes * 60) if timeout_minutes else None
-    return _run_with_watchdog(args, cwd or Path.cwd(), timeout_secs, env=env)
+    return _run_with_watchdog(
+        args, cwd or Path.cwd(), timeout_secs, env=env,
+        idle_timeout_seconds=idle_timeout_seconds,
+    )
 
 
 def run_task(
@@ -288,6 +373,7 @@ def run_task(
     on_timeout=None,
     quiet: bool = True,
     env: dict[str, str] | None = None,
+    idle_timeout_seconds: int | None = DEFAULT_IDLE_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess:
     """执行单个任务。与 run_stage 相同流程，但始终启用心跳看门狗超时控制。
 
@@ -303,7 +389,10 @@ def run_task(
     logger.debug(f"task params: {params}")
     logger.debug(f"goose args: {args}")
 
-    return _run_with_watchdog(args, cwd, timeout_minutes * 60, on_timeout=on_timeout, env=env)
+    return _run_with_watchdog(
+        args, cwd, timeout_minutes * 60, on_timeout=on_timeout, env=env,
+        idle_timeout_seconds=idle_timeout_seconds,
+    )
 
 
 class JdkNotFound(Exception):

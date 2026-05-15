@@ -1,8 +1,11 @@
 import subprocess
+import sys
 from pathlib import Path
 from pipeline.executor import (
     build_params, check_goose, run_stage, GooseError, GooseNotFound,
-    detect_jdk, JdkNotFound, _parse_javac_version,
+    detect_jdk, JdkNotFound, _parse_javac_version, _probe_process,
+    _classify_state, _cpu_time_to_seconds, _run_with_watchdog,
+    IDLE_TIMEOUT_RETURN_CODE,
 )
 
 
@@ -74,6 +77,51 @@ class TestRunStage:
             assert False, "should have raised"
         except GooseNotFound:
             pass
+
+
+class TestProcessDiagnostics:
+    def test_cpu_time_to_seconds(self):
+        assert _cpu_time_to_seconds("0:00:00") == 0
+        assert _cpu_time_to_seconds("0:01:05") == 65
+        assert _cpu_time_to_seconds("1:02:03") == 3723
+        assert _cpu_time_to_seconds("saier\\dingan") == 0
+
+    def test_classify_state_is_conservative(self):
+        assert _classify_state("Not Responding", "0:00:00") == "not_responding"
+        assert _classify_state("Running", "0:00:01") == "running_cpu_seen"
+        assert _classify_state("Running", "0:00:00") == "running_no_cpu_seen"
+
+    def test_probe_process_parses_csv_with_comma_memory(self, mocker):
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                '"goose.exe","35916","Console","84","1,428 K",'
+                '"Running","saier\\\\dingan","0:00:01","N/A"\n'
+            ),
+            stderr="",
+        )
+        mocker.patch("subprocess.run", return_value=completed)
+
+        info = _probe_process(35916)
+
+        assert "state=running_cpu_seen" in info
+        assert "status=Running" in info
+        assert "mem=1,428 K" in info
+        assert "cpu_time=0:00:01" in info
+
+
+class TestRunWithWatchdog:
+    def test_idle_timeout_kills_silent_process(self):
+        result = _run_with_watchdog(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            Path.cwd(),
+            timeout_seconds=10,
+            idle_timeout_seconds=1,
+        )
+
+        assert result.returncode == IDLE_TIMEOUT_RETURN_CODE
+        assert "without goose output" in result.stderr
 
 
 class TestParseJavacVersion:
