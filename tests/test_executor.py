@@ -1,3 +1,4 @@
+import io
 import subprocess
 import sys
 from pathlib import Path
@@ -78,6 +79,60 @@ class TestRunStage:
             assert False, "should have raised"
         except GooseNotFound:
             pass
+
+
+class TestRunWithWatchdog:
+    """超时返回契约 — 上层据此判定失败、保留沙箱，是断点恢复的入口。"""
+
+    class _FakeProc:
+        pid = 424242
+
+        def __init__(self, returncode=0):
+            self.returncode = returncode
+            self.stdout = io.StringIO("")
+            self.stderr = io.StringIO("")
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def kill(self):
+            pass
+
+    def _patch_executor(self, mocker, triggered, returncode=0):
+        from pipeline import executor
+
+        proc = self._FakeProc(returncode)
+        triggered_flag = triggered
+
+        class _FakeWatchdog:
+            def __init__(self, pid, timeout, on_timeout=None):
+                self.triggered = triggered_flag
+
+            def start(self):
+                pass
+
+            def cancel(self):
+                pass
+
+        mocker.patch.object(executor, "_spawn", return_value=proc)
+        mocker.patch.object(executor, "ProcessWatchdog", _FakeWatchdog)
+        return executor
+
+    def test_timeout_returns_watchdog_failure(self, mocker):
+        """看门狗触发时必须返回 -1 并标注原因，而不是透传子进程退出码。"""
+        executor = self._patch_executor(mocker, triggered=True, returncode=-9)
+        result = executor._run_with_watchdog(["goose"], Path("."), 1)
+        assert result.returncode == -1
+        assert "killed by watchdog after 1s" in result.stderr
+
+    def test_no_timeout_returns_process_returncode(self, mocker):
+        executor = self._patch_executor(mocker, triggered=False, returncode=0)
+        result = executor._run_with_watchdog(["goose"], Path("."), 1)
+        assert result.returncode == 0
+        assert "watchdog" not in result.stderr
 
 
 class TestParseJavacVersion:

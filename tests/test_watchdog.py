@@ -1,5 +1,7 @@
 """Tests for pipeline/watchdog.py — process watchdog with tree kill."""
 
+import os
+import signal
 import sys
 import time
 import subprocess
@@ -97,3 +99,53 @@ class TestProcessWatchdog:
         time.sleep(0.5)
         assert wd.triggered
         # Should not raise
+
+
+class TestUnixKill:
+    """_kill_unix 的进程组判定 — 直接影响是否会误杀调用方（管线自身）。
+
+    直接调用 _kill_unix 以绕过 sys.platform 分支，使用例在 Windows 上也可运行；
+    os.getpgid / os.killpg 在 Windows 不存在，故 setattr 需 raising=False。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _sigkill(self, monkeypatch):
+        # Windows 无 signal.SIGKILL；被测代码只在 POSIX 分支用到它，补桩即可跨平台运行
+        monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
+
+    def test_killpg_when_target_is_group_leader(self, monkeypatch):
+        wd = ProcessWatchdog(1234, 10)
+        calls = []
+        monkeypatch.setattr(os, "getpgid", lambda pid: pid, raising=False)
+        monkeypatch.setattr(os, "killpg", lambda pgid, sig: calls.append(("killpg", pgid)), raising=False)
+        monkeypatch.setattr(os, "kill", lambda pid, sig: calls.append(("kill", pid)), raising=False)
+        wd._kill_unix()
+        assert calls == [("killpg", 1234)]
+
+    def test_kill_pid_only_when_not_group_leader(self, monkeypatch):
+        """目标进程组 ID 与自身 PID 不同时，只能杀该 PID。
+
+        killpg 会命中整个进程组；若目标不是组长（pytest 下启动的普通子进程），
+        连带杀掉的会是调用方 —— 即管线自杀。
+        """
+        wd = ProcessWatchdog(1234, 10)
+        calls = []
+        monkeypatch.setattr(os, "getpgid", lambda pid: 999, raising=False)
+        monkeypatch.setattr(os, "killpg", lambda pgid, sig: calls.append(("killpg", pgid)), raising=False)
+        monkeypatch.setattr(os, "kill", lambda pid, sig: calls.append(("kill", pid)), raising=False)
+        wd._kill_unix()
+        assert calls == [("kill", 1234)]
+
+    def test_kill_pid_when_getpgid_fails(self, monkeypatch):
+        """进程已退出导致 getpgid 抛错时，退化为按 PID 终止。"""
+        wd = ProcessWatchdog(1234, 10)
+        calls = []
+
+        def _raise(pid):
+            raise ProcessLookupError(pid)
+
+        monkeypatch.setattr(os, "getpgid", _raise, raising=False)
+        monkeypatch.setattr(os, "killpg", lambda pgid, sig: calls.append(("killpg", pgid)), raising=False)
+        monkeypatch.setattr(os, "kill", lambda pid, sig: calls.append(("kill", pid)), raising=False)
+        wd._kill_unix()
+        assert calls == [("kill", 1234)]
