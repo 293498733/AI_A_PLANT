@@ -63,6 +63,29 @@ class TestDetectCycle:
         cycle = _detect_cycle(tasks)
         assert cycle is not None
 
+    def test_empty_graph(self):
+        """空任务图不是环 — 上游 tasks.yaml 为空时应正常返回而非报循环。"""
+        assert _detect_cycle({}) is None
+
+    def test_multiple_external_deps(self):
+        """全部 depends_on 都指向图外任务时，不构成环。"""
+        tasks = {
+            "a": _t("a", ["external_1"]),
+            "b": _t("b", ["external_2"]),
+            "c": _t("c", ["external_1", "external_2"]),
+        }
+        assert _detect_cycle(tasks) is None
+
+    def test_cycle_detected_with_external_deps_present(self):
+        """环内节点同时引用外部依赖时，仍应检出环。"""
+        tasks = {
+            "a": _t("a", ["b", "external"]),
+            "b": _t("b", ["a"]),
+        }
+        cycle = _detect_cycle(tasks)
+        assert cycle is not None
+        assert "a" in cycle and "b" in cycle
+
 
 class TestModuleBar:
     def test_empty(self):
