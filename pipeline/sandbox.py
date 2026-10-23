@@ -1,5 +1,7 @@
 """Git Worktree 沙箱管理器 — 为每个任务创建隔离的 git worktree。"""
 
+from __future__ import annotations
+
 import re
 import shutil
 import logging

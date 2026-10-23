@@ -1,5 +1,7 @@
 """任务状态管理 — task_state.json 的读写与依赖拓扑。"""
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
 from pipeline.state import read_task_state as _read, write_task_state as _write

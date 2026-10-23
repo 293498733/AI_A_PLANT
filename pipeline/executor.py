@@ -1,5 +1,7 @@
 """goose CLI 调用封装 — 实时输出、看门狗超时、日志捕获。"""
 
+from __future__ import annotations
+
 import os
 import time
 import shutil
