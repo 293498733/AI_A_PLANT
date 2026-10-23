@@ -1,5 +1,9 @@
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
+
 from pipeline.executor import (
     build_params, check_goose, run_stage, GooseError, GooseNotFound,
     detect_jdk, JdkNotFound, _parse_javac_version,
@@ -93,12 +97,16 @@ class TestParseJavacVersion:
 
 class TestDetectJdk:
     def test_finds_matching_jdk(self, mocker):
-        """detect_jdk finds JDK 17 on the actual system (D:/zulu17 or similar)."""
-        result = detect_jdk(17)
+        """detect_jdk 在当前主机找到 JDK 17；无 JDK 环境跳过。"""
+        try:
+            result = detect_jdk(17)
+        except JdkNotFound:
+            pytest.skip("当前主机未安装 JDK 17")
         assert result is not None
         assert "jdk" in result.lower() or "zulu" in result.lower()
-        # Verify javac exists at that path
-        javac = Path(result) / "bin" / "javac.exe"
+        # Verify javac exists at that path（Windows 为 javac.exe）
+        javac_name = "javac.exe" if sys.platform == "win32" else "javac"
+        javac = Path(result) / "bin" / javac_name
         assert javac.exists(), f"javac not found at {javac}"
 
     def test_raises_when_not_found(self, mocker):

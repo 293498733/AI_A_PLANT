@@ -7,15 +7,22 @@ import pytest
 from pipeline.watchdog import ProcessWatchdog, WatchdogTimeout
 
 
+def _spawn_sleeper(seconds: int):
+    """启动 sleep 子进程；POSIX 下独立会话，与生产 `_spawn` 行为一致。"""
+    kwargs = {} if sys.platform == "win32" else {"start_new_session": True}
+    return subprocess.Popen(
+        [sys.executable, "-c", f"import time; time.sleep({seconds})"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **kwargs,
+    )
+
+
 class TestProcessWatchdog:
     """Test the process watchdog timer and kill mechanism."""
 
     def test_watchdog_does_not_trigger_when_cancelled(self):
         """Watchdog should not fire if cancelled before timeout."""
-        proc = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(3)"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
+        proc = _spawn_sleeper(3)
         wd = ProcessWatchdog(proc.pid, 10)
         wd.start()
         proc.wait()
@@ -25,10 +32,7 @@ class TestProcessWatchdog:
 
     def test_watchdog_triggers_on_timeout(self):
         """Watchdog should kill the process after timeout."""
-        proc = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(60)"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
+        proc = _spawn_sleeper(60)
         wd = ProcessWatchdog(proc.pid, 1)
         wd.start()
         proc.wait()
@@ -43,10 +47,7 @@ class TestProcessWatchdog:
         def _cb():
             callback_called.append(True)
 
-        proc = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(60)"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
+        proc = _spawn_sleeper(60)
         wd = ProcessWatchdog(proc.pid, 1, on_timeout=_cb)
         wd.start()
         proc.wait()
@@ -68,10 +69,7 @@ class TestProcessWatchdog:
 
     def test_watchdog_triggered_flag(self):
         """triggered flag should be False before timeout, True after."""
-        proc = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(60)"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
+        proc = _spawn_sleeper(60)
         wd = ProcessWatchdog(proc.pid, 1)
         assert not wd.triggered
         wd.start()
