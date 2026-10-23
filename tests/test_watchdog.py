@@ -50,7 +50,11 @@ class TestProcessWatchdog:
         wd = ProcessWatchdog(proc.pid, 1, on_timeout=_cb)
         wd.start()
         proc.wait()
-        time.sleep(0.5)  # Allow Timer thread to execute callback
+        # 回调在杀进程之后执行；Windows 下 taskkill 二次确认最长等待 5 秒，
+        # 固定 sleep 会抖动，这里轮询等待回调。
+        deadline = time.time() + 15
+        while not callback_called and time.time() < deadline:
+            time.sleep(0.05)
         wd.cancel()
         assert wd.triggered
         assert len(callback_called) == 1
