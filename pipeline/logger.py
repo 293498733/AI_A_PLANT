@@ -1,5 +1,7 @@
 """结构化日志模块 - 同时输出到终端和文件。"""
 
+from __future__ import annotations
+
 import logging
 import sys
 from pathlib import Path

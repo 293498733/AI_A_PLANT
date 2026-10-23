@@ -10,6 +10,8 @@
     python pipeline.py --dry-run               # 预览将执行的阶段
 """
 
+from __future__ import annotations
+
 import sys
 import os
 import time

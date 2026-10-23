@@ -1,5 +1,7 @@
 """人工确认检查点。"""
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
 

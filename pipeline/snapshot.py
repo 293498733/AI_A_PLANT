@@ -6,6 +6,8 @@
 - 内容缓存：未变化文件复用上次读取的内容
 """
 
+from __future__ import annotations
+
 import json
 import hashlib
 import logging

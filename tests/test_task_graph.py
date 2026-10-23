@@ -3,18 +3,18 @@ import threading
 from pathlib import Path
 from pipeline.task_graph import (
     _detect_cycle, _module_bar, _detect_residual_files, _write_context_file,
-    _execute_single_task, _run_sub_pipeline, _get_verification_steps,
+    _execute_single_task, _run_sub_pipeline, _resolve_verification_steps,
     _run_verification_step,
     _TASK_OK, _TASK_RETRY, _TASK_SKIP, _TASK_ABORT,
 )
 from pipeline.config import TaskConfig
 
 
-def _t(id, deps=None):
-    return TaskConfig(id=id, name=id, description="", category="",
+def _t(id, deps=None, category="", verification="auto"):
+    return TaskConfig(id=id, name=id, description="", category=category,
                       estimated_turns=20, priority="P0", depends_on=deps or [],
                       input_files=[], output_files=[], context_notes="",
-                      reference_docs=[], module="")
+                      reference_docs=[], module="", verification=verification)
 
 
 class TestDetectCycle:
@@ -213,7 +213,7 @@ class TestExecuteSingleTask:
         )
 
         assert result == _TASK_RETRY
-        mocks["state_mgr"].mark_failed.assert_called_once()
+        mocks["state_mgr"].mark_failed_no_output.assert_called_once()
 
     def test_missing_output_files(self, mocker, tmp_path):
         mocks = self._make_mocks(mocker, tmp_path)
@@ -238,7 +238,7 @@ class TestExecuteSingleTask:
         )
 
         assert result == _TASK_RETRY  # now fails with retry when output files missing
-        mocks["state_mgr"].mark_failed.assert_called_once()
+        mocks["state_mgr"].mark_failed_no_output.assert_called_once()
 
     def test_sandbox_disabled(self, mocker, tmp_path):
         mocks = self._make_mocks(mocker, tmp_path)
@@ -320,12 +320,12 @@ class TestExecuteSingleTask:
         )
 
         assert result == _TASK_RETRY
-        mocks["state_mgr"].mark_failed.assert_called_once()
+        mocks["state_mgr"].mark_failed_no_output.assert_called_once()
 
     def test_verification_passed(self, mocker, tmp_path):
         """验证步骤全部通过 → 任务成功。"""
         mocks = self._make_mocks(mocker, tmp_path)
-        task = self._make_task()
+        task = self._make_task(category="backend-api")
         (tmp_path / "out.py").write_text("# generated")
 
         # Mock _run_verification_step to pass
@@ -342,7 +342,10 @@ class TestExecuteSingleTask:
             profile_path=tmp_path / "profile.yml",
             task_recipe="recipe.yaml",
             lock=mocks["lock"],
-            verification_steps=[("compile", ["mvn compile"]), ("test", ["mvn test"])],
+            profile={"commands": {
+                "compileOnly": ["mvn -DskipTests compile"],
+                "test": ["mvn test"],
+            }},
         )
 
         assert result == _TASK_OK
@@ -351,7 +354,7 @@ class TestExecuteSingleTask:
     def test_verification_failed_with_retry(self, mocker, tmp_path):
         """验证失败 → 任务标记失败 → 根据 error_handler 决定重试。"""
         mocks = self._make_mocks(mocker, tmp_path)
-        task = self._make_task()
+        task = self._make_task(category="backend-api")
         (tmp_path / "out.py").write_text("# generated")
 
         # Mock _run_verification_step: compile passes, test fails
@@ -377,56 +380,60 @@ class TestExecuteSingleTask:
             profile_path=tmp_path / "profile.yml",
             task_recipe="recipe.yaml",
             lock=mocks["lock"],
-            verification_steps=[("compile", ["mvn compile"]), ("test", ["mvn test"])],
+            profile={"commands": {
+                "compileOnly": ["mvn -DskipTests compile"],
+                "test": ["mvn test"],
+            }},
         )
 
         assert result == _TASK_RETRY
-        mocks["state_mgr"].mark_failed.assert_called_once()
+        # v3.8 三元状态：代码已产出但验证失败 → code_produced，而非 failed
+        mocks["state_mgr"].mark_code_produced.assert_called_once()
+        args, kwargs = mocks["state_mgr"].mark_code_produced.call_args
+        assert args[0] == "t1"
+        assert "test FAILED" in kwargs["verification_error"]
         # Sandbox sync should NOT be called (verification failed)
         mocks["mock_sandbox"].sync_outputs.assert_not_called()
 
 
-class TestGetVerificationSteps:
-    def test_full_commands(self):
-        profile = {
-            "commands": {
-                "compileOnly": ["mvn -DskipTests compile"],
-                "build": ["mvn clean package"],
-                "test": ["mvn test"],
-            }
+class TestResolveVerificationSteps:
+    """v3.8：按任务类型（category / verification）选择验证策略。"""
+
+    PROFILE = {
+        "commands": {
+            "compileOnly": ["mvn -DskipTests compile"],
+            "build": ["mvn clean package"],
+            "test": ["mvn test"],
+            "frontendCheck": ["npm run build"],
         }
-        steps = _get_verification_steps(profile)
-        assert len(steps) == 2
-        assert steps[0][0] == "compile"
-        assert steps[1][0] == "test"
+    }
+
+    def test_backend_compile_and_test(self):
+        steps = _resolve_verification_steps(_t("t", category="backend-api"), self.PROFILE)
+        assert steps == [
+            ("compile", ["mvn -DskipTests compile"]),
+            ("test", ["mvn test"]),
+        ]
 
     def test_build_only(self):
-        profile = {
-            "commands": {
-                "build": ["mvn clean package"],
-            }
-        }
-        steps = _get_verification_steps(profile)
-        assert len(steps) == 1
-        assert steps[0][0] == "build"
+        profile = {"commands": {"build": ["mvn clean package"]}}
+        steps = _resolve_verification_steps(_t("t", category="backend"), profile)
+        assert steps == [("build", ["mvn clean package"])]
 
     def test_no_commands(self):
-        profile = {"profile": "java-spring"}
-        steps = _get_verification_steps(profile)
-        assert steps == []
+        assert _resolve_verification_steps(
+            _t("t", category="backend"), {"profile": "java-spring"}) == []
 
     def test_empty_profile(self):
-        assert _get_verification_steps({}) == []
+        assert _resolve_verification_steps(_t("t", category="backend"), {}) == []
+
+    def test_none_profile(self):
+        assert _resolve_verification_steps(_t("t", category="backend"), None) == []
 
     def test_compile_only_no_test(self):
-        profile = {
-            "commands": {
-                "compileOnly": ["mvn -DskipTests compile"],
-            }
-        }
-        steps = _get_verification_steps(profile)
-        assert len(steps) == 1
-        assert steps[0][0] == "compile"
+        profile = {"commands": {"compileOnly": ["mvn -DskipTests compile"]}}
+        steps = _resolve_verification_steps(_t("t", category="backend"), profile)
+        assert steps == [("compile", ["mvn -DskipTests compile"])]
 
     def test_build_with_test_no_compile_only(self):
         """有 build + test 但无 compileOnly → 只用 build（已含测试）。"""
@@ -436,9 +443,38 @@ class TestGetVerificationSteps:
                 "test": ["mvn test"],
             }
         }
-        steps = _get_verification_steps(profile)
-        assert len(steps) == 1
-        assert steps[0][0] == "build"
+        steps = _resolve_verification_steps(_t("t", category="backend"), profile)
+        assert steps == [("build", ["mvn clean package"])]
+
+    def test_auto_frontend(self):
+        steps = _resolve_verification_steps(_t("t", category="frontend-vue"), self.PROFILE)
+        assert steps == [("frontend", ["npm run build"])]
+
+    def test_auto_frontend_without_check_command(self):
+        steps = _resolve_verification_steps(
+            _t("t", category="frontend-vue"), {"commands": {}})
+        assert steps == []
+
+    def test_auto_test_category_skips_verification(self):
+        """category 含 test → 不做编译/测试验证（避免自验证循环）。"""
+        assert _resolve_verification_steps(_t("t", category="test"), self.PROFILE) == []
+
+    def test_explicit_none_skips_verification(self):
+        assert _resolve_verification_steps(
+            _t("t", category="backend", verification="none"), self.PROFILE) == []
+
+    def test_explicit_frontend_overrides_category(self):
+        steps = _resolve_verification_steps(
+            _t("t", category="backend-api", verification="frontend"), self.PROFILE)
+        assert steps == [("frontend", ["npm run build"])]
+
+    def test_explicit_backend_overrides_category(self):
+        steps = _resolve_verification_steps(
+            _t("t", category="frontend-vue", verification="backend"), self.PROFILE)
+        assert steps == [
+            ("compile", ["mvn -DskipTests compile"]),
+            ("test", ["mvn test"]),
+        ]
 
 
 class TestRunVerificationStep:

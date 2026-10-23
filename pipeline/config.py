@@ -1,5 +1,7 @@
 """配置加载 - pipeline.yaml 和 profile.yml 解析。"""
 
+from __future__ import annotations
+
 import yaml
 import re
 import logging

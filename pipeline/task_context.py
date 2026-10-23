@@ -1,5 +1,7 @@
 """上下文组装器 — 为每个任务构建独立的 goose 会话上下文。"""
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
 
