@@ -5,6 +5,8 @@ v3.4: 单任务验证闭环 — goose 产出后沙箱内编译+测试，全部�
 v3.8: 按任务类型验证 + 三元任务状态 + JAVA_HOME 加固 + 阶段前置守卫。
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re

@@ -1,5 +1,7 @@
 """独立线程进程看门狗 — 到时间后强制终止整个进程树。"""
 
+from __future__ import annotations
+
 import os
 import sys
 import time
@@ -89,13 +91,23 @@ class ProcessWatchdog:
 
     def _kill_unix(self):
         import signal
+        # 仅当目标自己是进程组组长时才 killpg；否则会连带杀掉调用方所在进程组
+        # （如 pytest / 管线自身），造成"看门狗自杀"。
+        pgid = None
         try:
-            os.killpg(os.getpgid(self._pid), signal.SIGKILL)
-        except Exception as e1:
+            pgid = os.getpgid(self._pid)
+        except Exception:
+            pass
+        if pgid == self._pid:
             try:
-                os.kill(self._pid, signal.SIGKILL)
-            except Exception as e2:
-                logger.error(f"Unix kill failed for PID {self._pid}: killpg={e1}, kill={e2}")
+                os.killpg(pgid, signal.SIGKILL)
+                return
+            except Exception as e:
+                logger.error(f"Unix killpg failed for PID {self._pid}: {e}")
+        try:
+            os.kill(self._pid, signal.SIGKILL)
+        except Exception as e:
+            logger.error(f"Unix kill failed for PID {self._pid}: {e}")
 
     def _is_process_dead(self) -> bool:
         try:

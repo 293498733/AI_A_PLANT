@@ -1,11 +1,14 @@
 """goose CLI 调用封装 — 实时输出、看门狗超时、日志捕获。"""
 
+from __future__ import annotations
+
 import os
 import time
 import shutil
 import logging
 import threading
 import subprocess
+import sys
 from collections import deque
 from pathlib import Path
 
@@ -78,10 +81,15 @@ def _build_args(recipe: str, max_turns: int, params: dict[str, str], quiet: bool
 
 
 def _spawn(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.Popen:
-    """启动 goose 子进程，捕获 stdout/stderr 管道。env 合并入子进程环境。"""
+    """启动 goose 子进程，捕获 stdout/stderr 管道。env 合并入子进程环境。
+
+    POSIX 下使用独立会话：看门狗超时用 killpg 终止时，只会命中 goose 进程树，
+    不会波及管线自身所在的进程组。
+    """
     proc_env = None
     if env:
         proc_env = {**os.environ, **env}
+    isolated = {} if sys.platform == "win32" else {"start_new_session": True}
     try:
         return subprocess.Popen(
             args,
@@ -93,6 +101,7 @@ def _spawn(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> sub
             encoding="utf-8",
             errors="replace",
             env=proc_env,
+            **isolated,
         )
     except FileNotFoundError:
         raise GooseNotFound("goose CLI not found in PATH")
