@@ -38,5 +38,8 @@
 
 - `ARCHITECTURE.md` — 架构设计文档
 - `README.md` — 用户手册
+- `CONTRIBUTING.md` — 贡献指南（环境、测试、提交规范、PR 流程）
+- `CHANGELOG.md` — 版本变更记录
+- `docs/FAQ.md` — 常见问题
 - `docs/plans/implementation-tracker.md` — **← 新会话首先看这个**：已实现/实施中/计划实现
 - `docs/status.md` — 模块状态 + Bug 追踪
