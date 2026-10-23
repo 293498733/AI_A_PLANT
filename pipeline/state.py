@@ -1,5 +1,7 @@
 """状态文件管理 - .pipeline_stage / .pipeline_note 读写。"""
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
 

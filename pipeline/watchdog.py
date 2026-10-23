@@ -1,5 +1,7 @@
 """独立线程进程看门狗 — 到时间后强制终止整个进程树。"""
 
+from __future__ import annotations
+
 import os
 import sys
 import time

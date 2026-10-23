@@ -7,6 +7,8 @@
 - 提取结果缓存到 .ai-dev/summaries/{hash}.md
 """
 
+from __future__ import annotations
+
 import re
 import hashlib
 import logging

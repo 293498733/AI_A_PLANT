@@ -1,5 +1,7 @@
 """Git 操作封装 — 自动提交、stash、commit hash 提取。"""
 
+from __future__ import annotations
+
 import logging
 import subprocess
 from pathlib import Path
