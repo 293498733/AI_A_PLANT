@@ -3,6 +3,10 @@
 > One command drives the full pipeline: requirements → analysis → design → code → review → delivery.
 > Interruptible and resumable, with a human in the loop at every decision point.
 
+[![PyPI](https://img.shields.io/pypi/v/ai-dev-flow.svg)](https://pypi.org/project/ai-dev-flow/)
+[![Python](https://img.shields.io/pypi/pyversions/ai-dev-flow.svg)](https://pypi.org/project/ai-dev-flow/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Status**: Active development (v3.10.0) · [中文文档](README.md)
 
 ---

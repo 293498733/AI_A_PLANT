@@ -3,6 +3,10 @@
 > 一条命令驱动「需求→分析→方案→编码→审查→交付」的完整开发管线。
 > 中断可恢复，失败可介入，全过程可追溯。
 
+[![PyPI](https://img.shields.io/pypi/v/ai-dev-flow.svg)](https://pypi.org/project/ai-dev-flow/)
+[![Python](https://img.shields.io/pypi/pyversions/ai-dev-flow.svg)](https://pypi.org/project/ai-dev-flow/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Status**: Active development (v3.10.0) · [English](README.en.md)
 
 ---
