@@ -23,7 +23,7 @@
 | `ai_dev_flow/sandbox.py` | ✅ | v3.2 | Git worktree 沙箱管理器 |
 | `ai_dev_flow/watchdog.py` | ✅ | v3.2 | 进程看门狗（taskkill /F /T） |
 | `ai_dev_flow/cli.py` | ✅ | v3.10 | CLI 入口（前置守卫，console script） |
-| `ai_dev_flow/data/pipeline.yaml` | ✅ | v3.8 | 12 阶段定义（Phase 5 prerequisite） |
+| `ai_dev_flow/data/pipeline.yaml` | ✅ | v3.8 | 14 个条目（9 阶段 + 5 检查点，Phase 5 prerequisite） |
 | Recipe 文件 (9) | ✅ | v3.1 | `data/recipes/steps/`，Phase 0-7 + task-template |
 | `tests/` (15 文件) | ✅ | v3.9.0 | 212 测试覆盖全模块 |
 | `.github/workflows/test.yml` | ✅ | 完成 | GitHub Actions CI |

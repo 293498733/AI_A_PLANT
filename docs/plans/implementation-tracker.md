@@ -10,7 +10,7 @@
 - `pyproject.toml` + console script `ai-dev-flow`，`python -m ai_dev_flow` 可用
 - 顶层包 `pipeline` → `ai_dev_flow`（PyPI 已有同名 `pipeline` 包，避免冲突）
 - `pipeline.yaml` / `recipes/` / `profiles/` 移入 `ai_dev_flow/data/`，随 wheel 分发
-- wheel 在干净 venv 中安装验证：CLI、模块入口、14 阶段配置、recipe 路径解析均正常
+- wheel 在干净 venv 中安装验证：CLI、模块入口、pipeline.yaml 的 14 个阶段条目、9 个 recipe 路径解析均正常
 
 ### v3.9.0 — 开源发布准备 (2026-11-10)
 - `LICENSE`（MIT）：补齐仓库缺失的许可证文件

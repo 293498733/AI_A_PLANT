@@ -19,7 +19,7 @@ TESTPROJ = Path(__file__).parent / "testproj"
 @pytest.mark.integration
 class TestRealPipelineConfig:
     def test_parses_without_error(self):
-        cfg = load_pipeline(DATA_DIR / "ai_dev_flow.yaml")
+        cfg = load_pipeline(DATA_DIR / "pipeline.yaml")
         assert len(cfg.stages) >= 10
         # Verify Phase 0 is first
         assert cfg.stages[0].id == "phase0"
@@ -28,7 +28,7 @@ class TestRealPipelineConfig:
         assert len(task_graph_stages) == 1
 
     def test_all_stages_have_state_value(self):
-        cfg = load_pipeline(DATA_DIR / "ai_dev_flow.yaml")
+        cfg = load_pipeline(DATA_DIR / "pipeline.yaml")
         for s in cfg.stages:
             assert s.state_value, f"Stage {s.id} missing state_value"
             if s.is_checkpoint:

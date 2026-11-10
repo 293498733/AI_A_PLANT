@@ -25,7 +25,7 @@ AI 引擎 (goose CLI)         ← LLM 通信，执行具体任务
 | 检查点 | `ai_dev_flow/checkpoint.py` | 人工确认交互 + CI 自动跳过 |
 | 错误 | `ai_dev_flow/error_handler.py` | 阶段级 + 任务级双层错误处理 + CI 自动决策 |
 | 日志 | `ai_dev_flow/logger.py` | 结构化日志，终端+文件双输出 |
-| 阶段定义 | `data/pipeline.yaml` | 12 阶段列表、参数、状态值 |
+| 阶段定义 | `data/pipeline.yaml` | 14 个阶段条目列表、参数、状态值 |
 | 任务状态 | `ai_dev_flow/task_state.py` | TaskStateManager，依赖拓扑 + 崩溃恢复 + 模块进度 |
 | 上下文 | `ai_dev_flow/task_context.py` | ContextAssembler，增量扫描 + 语义摘要 + 文件组装 |
 | 任务图 | `ai_dev_flow/task_graph.py` | 任务图执行器，fresh session per task + 知识注入 |
@@ -97,10 +97,10 @@ data/pipeline.yaml  ──→ config.py (StageConfig) ──→ cli.py (主循�
 ```
 ai-dev-flow/
 ├── pipeline.py                 ← 源码树启动器（等价 ai-dev-flow 命令）
-├── ai_dev_flow/                ← 编排引擎包（16 个模块）
+├── ai_dev_flow/                ← 编排引擎包（18 个 Python 文件）
 │   ├── cli.py                  ← 入口
-│   ├── data/pipeline.yaml      ← 阶段定义（数据驱动，12 阶段）
-│   ├── data/recipes/steps/     ← 10 个 Goose Recipe
+│   ├── data/pipeline.yaml      ← 阶段定义（数据驱动，14 个条目）
+│   ├── data/recipes/steps/     ← 9 个 Goose Recipe
 │   ├── __init__.py
 │   ├── config.py
 │   ├── state.py

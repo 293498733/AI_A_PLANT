@@ -64,9 +64,12 @@ Phase 7 ─── delivery (change list, build verification, review verdict)
 ### Install
 
 ```bash
+# install from PyPI
+pip install ai-dev-flow
+
+# or run from a source checkout
 git clone https://github.com/293498733/AI_A_PLANT.git
-cd AI_A_PLANT
-pip install ai-dev-flow        # or: pip install -r requirements.txt
+cd AI_A_PLANT && pip install -r requirements.txt
 
 # supply the API key via environment variable
 export CUSTOM_DEEPSEEK_API_KEY=your_key      # Windows: set CUSTOM_DEEPSEEK_API_KEY=your_key

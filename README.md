@@ -68,11 +68,12 @@ Phase 7 ─── 交付 (变更清单、构建验证、审查结论)
 ### 安装
 
 ```bash
-git clone https://github.com/293498733/AI_A_PLANT.git
-cd AI_A_PLANT
+# 从 PyPI 安装
+pip install ai-dev-flow
 
-# 安装 Python 依赖
-pip install -r requirements.txt
+# 或直接用源码树运行（根目录 python pipeline.py 等价）
+git clone https://github.com/293498733/AI_A_PLANT.git
+cd AI_A_PLANT && pip install -r requirements.txt
 
 # 配置 API Key
 set CUSTOM_DEEPSEEK_API_KEY=你的key

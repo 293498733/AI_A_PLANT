@@ -21,9 +21,9 @@
 
 | 目录/文件 | 用途 |
 |-----------|------|
-| `ai_dev_flow/` | 编排引擎包（17 个 Python 文件，含 cli/`__main__`） |
+| `ai_dev_flow/` | 编排引擎包（18 个 Python 文件） |
 | `ai_dev_flow/cli.py` | CLI 主入口（根 `pipeline.py` 为等价启动器） |
-| `ai_dev_flow/data/pipeline.yaml` | 12 阶段定义 |
+| `ai_dev_flow/data/pipeline.yaml` | 14 个条目（9 个执行阶段 + 5 个检查点） |
 | `ai_dev_flow/data/recipes/steps/` | AI 阶段 Recipe（9 个 YAML） |
 | `tests/` | 单元 + 集成测试（15 个文件） |
 | `.claude/rules/` | 开发规则（Git 工作流、编码规范、环境要求） |
