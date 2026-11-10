@@ -38,3 +38,9 @@ temp/
 
 # DSH 审查标记（dsh_gate.py 自动维护，不入库）
 .dsh/
+
+# 构建产物与本地临时目录
+build/
+dist/
+*.egg-info/
+.tmp/

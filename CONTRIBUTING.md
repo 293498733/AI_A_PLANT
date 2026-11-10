@@ -31,10 +31,10 @@ pytest tests/ -v -m "not integration"
 
 ## 代码结构
 
-- `pipeline/` — 编排引擎模块
-- `pipeline.py` — CLI 入口
-- `pipeline.yaml` — 阶段定义
-- `recipes/steps/` — 各阶段的 goose recipe
+- `ai_dev_flow/` — 编排引擎包
+- `ai_dev_flow/cli.py` — CLI 入口（根目录 `pipeline.py` 是等价启动器）
+- `ai_dev_flow/data/pipeline.yaml` — 阶段定义
+- `ai_dev_flow/data/recipes/steps/` — 各阶段的 goose recipe
 - `tests/` — 单元与集成测试
 
 架构说明见 `ARCHITECTURE.md`，编码约定见 `.claude/rules/`。

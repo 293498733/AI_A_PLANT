@@ -1,13 +1,13 @@
 import subprocess
 import threading
 from pathlib import Path
-from pipeline.task_graph import (
+from ai_dev_flow.task_graph import (
     _detect_cycle, _module_bar, _detect_residual_files, _write_context_file,
     _execute_single_task, _run_sub_pipeline, _resolve_verification_steps,
     _run_verification_step,
     _TASK_OK, _TASK_RETRY, _TASK_SKIP, _TASK_ABORT,
 )
-from pipeline.config import TaskConfig
+from ai_dev_flow.config import TaskConfig
 
 
 def _t(id, deps=None, category="", verification="auto"):
@@ -167,17 +167,17 @@ class TestExecuteSingleTask:
         mock_result = mocker.MagicMock()
         mock_result.returncode = 0
         mock_result.stderr = ""
-        mocker.patch("pipeline.task_graph.run_task", return_value=mock_result)
+        mocker.patch("ai_dev_flow.task_graph.run_task", return_value=mock_result)
 
         # Mock handle_task_error to return RETRY on first failure
-        mocker.patch("pipeline.task_graph.handle_task_error", return_value=mocker.MagicMock())
+        mocker.patch("ai_dev_flow.task_graph.handle_task_error", return_value=mocker.MagicMock())
 
         # Mock SandboxManager
         mock_sandbox = mocker.MagicMock()
         mock_sandbox.create.return_value = tmp_path
         mock_sandbox.detect_extra_modifications.return_value = set()
         mock_sandbox.sync_outputs.return_value = ["out.py"]
-        mocker.patch("pipeline.task_graph.SandboxManager", return_value=mock_sandbox)
+        mocker.patch("ai_dev_flow.task_graph.SandboxManager", return_value=mock_sandbox)
 
         return dict(
             state_mgr=state_mgr, context_asm=context_asm,
@@ -216,11 +216,11 @@ class TestExecuteSingleTask:
         mock_result = mocker.MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "something went wrong"
-        mocker.patch("pipeline.task_graph.run_task", return_value=mock_result)
+        mocker.patch("ai_dev_flow.task_graph.run_task", return_value=mock_result)
 
         # handle_task_error returns RETRY_TASK
-        from pipeline.error_handler import TaskAction
-        mocker.patch("pipeline.task_graph.handle_task_error", return_value=TaskAction.RETRY_TASK)
+        from ai_dev_flow.error_handler import TaskAction
+        mocker.patch("ai_dev_flow.task_graph.handle_task_error", return_value=TaskAction.RETRY_TASK)
 
         result = _execute_single_task(
             tid="t1", task=task,
@@ -244,8 +244,8 @@ class TestExecuteSingleTask:
         task = self._make_task(output_files=["nonexistent.py"])
 
         # Mock handle_task_error to return RETRY so we get TASK_RETRY
-        from pipeline.error_handler import TaskAction
-        mocker.patch("pipeline.task_graph.handle_task_error", return_value=TaskAction.RETRY_TASK)
+        from ai_dev_flow.error_handler import TaskAction
+        mocker.patch("ai_dev_flow.task_graph.handle_task_error", return_value=TaskAction.RETRY_TASK)
 
         result = _execute_single_task(
             tid="t1", task=task,
@@ -296,7 +296,7 @@ class TestExecuteSingleTask:
         mock_result = mocker.MagicMock()
         mock_result.returncode = 0
         mock_result.stderr = ""
-        mocker.patch("pipeline.task_graph._run_sub_pipeline", return_value=(mock_result, None))
+        mocker.patch("ai_dev_flow.task_graph._run_sub_pipeline", return_value=(mock_result, None))
 
         result = _execute_single_task(
             tid="t1", task=task,
@@ -324,10 +324,10 @@ class TestExecuteSingleTask:
         mock_result = mocker.MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "phase code failed"
-        mocker.patch("pipeline.task_graph._run_sub_pipeline", return_value=(mock_result, None))
+        mocker.patch("ai_dev_flow.task_graph._run_sub_pipeline", return_value=(mock_result, None))
 
-        from pipeline.error_handler import TaskAction
-        mocker.patch("pipeline.task_graph.handle_task_error", return_value=TaskAction.RETRY_TASK)
+        from ai_dev_flow.error_handler import TaskAction
+        mocker.patch("ai_dev_flow.task_graph.handle_task_error", return_value=TaskAction.RETRY_TASK)
 
         result = _execute_single_task(
             tid="t1", task=task,
@@ -352,7 +352,7 @@ class TestExecuteSingleTask:
         (tmp_path / "out.py").write_text("# generated")
 
         # Mock _run_verification_step to pass
-        mocker.patch("pipeline.task_graph._run_verification_step", return_value=(True, "OK"))
+        mocker.patch("ai_dev_flow.task_graph._run_verification_step", return_value=(True, "OK"))
 
         result = _execute_single_task(
             tid="t1", task=task,
@@ -388,9 +388,9 @@ class TestExecuteSingleTask:
                 return (True, "compile OK")
             return (False, "test FAILED: 3 tests, 1 failure")
 
-        mocker.patch("pipeline.task_graph._run_verification_step", side_effect=_mock_verify)
-        from pipeline.error_handler import TaskAction
-        mocker.patch("pipeline.task_graph.handle_task_error", return_value=TaskAction.RETRY_TASK)
+        mocker.patch("ai_dev_flow.task_graph._run_verification_step", side_effect=_mock_verify)
+        from ai_dev_flow.error_handler import TaskAction
+        mocker.patch("ai_dev_flow.task_graph.handle_task_error", return_value=TaskAction.RETRY_TASK)
 
         result = _execute_single_task(
             tid="t1", task=task,

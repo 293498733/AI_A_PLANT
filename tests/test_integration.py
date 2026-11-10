@@ -5,20 +5,21 @@ Run with: pytest tests/ -m integration
 import pytest
 from pathlib import Path
 
-from pipeline.config import load_pipeline, load_task_graph, load_profile
-from pipeline.task_state import (
+from ai_dev_flow.config import load_pipeline, load_task_graph, load_profile
+from ai_dev_flow.task_state import (
     TaskStateManager, STATUS_PENDING, STATUS_COMPLETED, STATUS_SKIPPED,
 )
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / "ai_dev_flow" / "data"
 TESTPROJ = Path(__file__).parent / "testproj"
 
 
 @pytest.mark.integration
 class TestRealPipelineConfig:
     def test_parses_without_error(self):
-        cfg = load_pipeline(PROJECT_ROOT / "pipeline.yaml")
+        cfg = load_pipeline(DATA_DIR / "ai_dev_flow.yaml")
         assert len(cfg.stages) >= 10
         # Verify Phase 0 is first
         assert cfg.stages[0].id == "phase0"
@@ -27,7 +28,7 @@ class TestRealPipelineConfig:
         assert len(task_graph_stages) == 1
 
     def test_all_stages_have_state_value(self):
-        cfg = load_pipeline(PROJECT_ROOT / "pipeline.yaml")
+        cfg = load_pipeline(DATA_DIR / "ai_dev_flow.yaml")
         for s in cfg.stages:
             assert s.state_value, f"Stage {s.id} missing state_value"
             if s.is_checkpoint:
@@ -37,7 +38,7 @@ class TestRealPipelineConfig:
 @pytest.mark.integration
 class TestRealProfileConfig:
     def test_parses_without_error(self):
-        profile = load_profile(PROJECT_ROOT / "profiles" / "java-spring.yml")
+        profile = load_profile(DATA_DIR / "profiles" / "java-spring.yml")
         assert profile is not None
         assert "profile" in profile
         assert "backend" in profile
@@ -113,8 +114,8 @@ class TestTaskStateFullLifecycle:
 @pytest.mark.integration
 class TestCycleDetectionWithRealisticGraph:
     def test_complex_dag_no_cycle(self):
-        from pipeline.task_graph import _detect_cycle
-        from pipeline.config import TaskConfig
+        from ai_dev_flow.task_graph import _detect_cycle
+        from ai_dev_flow.config import TaskConfig
 
         tasks = {
             "init": TaskConfig(id="init", name="Init", description="",

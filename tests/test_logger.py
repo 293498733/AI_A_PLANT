@@ -1,5 +1,5 @@
 import logging
-from pipeline.logger import CleanupFilter, TerminalFormatter, get, _LOGGER
+from ai_dev_flow.logger import CleanupFilter, TerminalFormatter, get, _LOGGER
 
 
 class TestCleanupFilter:
@@ -52,7 +52,7 @@ class TestTerminalFormatter:
 class TestGetUninitialized:
     def test_raises_when_not_init(self, monkeypatch):
         # Save and clear the global logger
-        monkeypatch.setattr("pipeline.logger._LOGGER", None)
+        monkeypatch.setattr("ai_dev_flow.logger._LOGGER", None)
         try:
             get()
             assert False, "should have raised"

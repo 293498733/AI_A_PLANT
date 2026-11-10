@@ -6,7 +6,7 @@ import sys
 import time
 import subprocess
 import pytest
-from pipeline.watchdog import ProcessWatchdog, WatchdogTimeout
+from ai_dev_flow.watchdog import ProcessWatchdog, WatchdogTimeout
 
 
 def _spawn_sleeper(seconds: int):

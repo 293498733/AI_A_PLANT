@@ -3,7 +3,7 @@
 > 一条命令驱动「需求→分析→方案→编码→审查→交付」的完整开发管线。
 > 中断可恢复，失败可介入，全过程可追溯。
 
-**Status**: Active development (v3.9.0) · [English](README.en.md)
+**Status**: Active development (v3.10.0) · [English](README.en.md)
 
 ---
 
@@ -36,7 +36,7 @@
 ## 流程总览
 
 ```
-python pipeline.py --project D:/MyPrj/你的项目
+ai-dev-flow --project D:/MyPrj/你的项目
 
 Phase 1 ─── 需求精炼 (AI 输出结构化需求文档)
   ⚠ 检查点 A ─ 确认需求
@@ -83,16 +83,16 @@ set CUSTOM_DEEPSEEK_API_KEY=你的key
 
 ```bash
 # 交互式启动
-python pipeline.py
+ai-dev-flow
 
 # 指定项目路径
-python pipeline.py --project D:/MyPrj/my-project
+ai-dev-flow --project D:/MyPrj/my-project
 
 # 从指定阶段开始
-python pipeline.py --project D:/MyPrj/my-project --from-stage phase3
+ai-dev-flow --project D:/MyPrj/my-project --from-stage phase3
 
 # 预览模式（不实际执行）
-python pipeline.py --project D:/MyPrj/my-project --dry-run
+ai-dev-flow --project D:/MyPrj/my-project --dry-run
 ```
 
 ---
@@ -130,11 +130,11 @@ python pipeline.py --project D:/MyPrj/my-project --dry-run
 
 ```
 ai-dev-flow/
-├── pipeline.py              ← 入口
-├── pipeline.yaml            ← 阶段定义
-├── pipeline/                ← 编排引擎
-├── recipes/steps/           ← AI 阶段定义 (9 个 YAML)
-├── profiles/                ← 项目画像模板
+├── pipeline.py              ← 源码树启动器（等价 ai-dev-flow 命令）
+├── ai_dev_flow/             ← 编排引擎包
+│   ├── cli.py               ← CLI 入口
+│   └── data/                ← 阶段定义、Recipe、Profile 模板（随包安装）
+├── tests/                   ← 212 个用例
 ├── ARCHITECTURE.md          ← 架构设计
 └── CLAUDE.md                ← 开发进度
 ```

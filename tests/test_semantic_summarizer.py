@@ -1,5 +1,5 @@
 from pathlib import Path
-from pipeline.semantic_summarizer import SemanticSummarizer
+from ai_dev_flow.semantic_summarizer import SemanticSummarizer
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

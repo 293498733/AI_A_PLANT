@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from pipeline.semantic_summarizer import SemanticSummarizer
+from ai_dev_flow.semantic_summarizer import SemanticSummarizer
 
 logger = logging.getLogger("ai-dev-flow")
 

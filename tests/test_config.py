@@ -1,5 +1,5 @@
 from pathlib import Path
-from pipeline.config import (
+from ai_dev_flow.config import (
     StageConfig, TaskConfig, TaskGraphConfig, PipelineConfig,
     load_pipeline, load_task_graph, load_profile,
 )

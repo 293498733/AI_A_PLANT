@@ -1,5 +1,5 @@
 import subprocess
-from pipeline.git_ops import GitOps
+from ai_dev_flow.git_ops import GitOps
 
 
 class TestInit:

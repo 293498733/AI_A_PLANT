@@ -4,9 +4,9 @@
 
 ## 如何自定义某个阶段的 Recipe？
 
-改 `pipeline.yaml` 中对应 stage 的 `recipe:` 路径即可，阶段列表不需要改 Python 代码。
+改 `ai_dev_flow/data/pipeline.yaml` 中对应 stage 的 `recipe:` 路径即可，阶段列表不需要改 Python 代码。
 
-建议复制 `recipes/steps/` 下的模板改一份，保留原文件，再把 `recipe:` 指过去。阶段参数通过 `params:` 传入，recipe 里用 `{{ project_root }}` 这类占位符接收。
+建议复制 `ai_dev_flow/data/recipes/steps/` 下的模板改一份，保留原文件，再把 `recipe:` 指过去。阶段参数通过 `params:` 传入，recipe 里用 `{{ project_root }}` 这类占位符接收。
 
 ## 能跳过人工确认，全自动跑吗？
 
@@ -39,7 +39,7 @@
 
 ## 能用在非 Java / Vue 项目上吗？
 
-编排层与语言无关。但 `recipes/steps/00-init-project.yaml` 默认扫描 Spring Boot / Vue 特征，`pipeline.yaml` 的验证参数也偏 Java / 前端。非这两类项目需要调整对应 recipe 和阶段 `params`。
+编排层与语言无关。但 `ai_dev_flow/data/recipes/steps/00-init-project.yaml` 默认扫描 Spring Boot / Vue 特征，`ai_dev_flow/data/pipeline.yaml` 的验证参数也偏 Java / 前端。非这两类项目需要调整对应 recipe 和阶段 `params`。
 
 ## 为什么每个任务都要一次 git commit？
 

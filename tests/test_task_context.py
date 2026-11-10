@@ -1,5 +1,5 @@
 from pathlib import Path
-from pipeline.task_context import TaskContext, ContextAssembler
+from ai_dev_flow.task_context import TaskContext, ContextAssembler
 
 
 class TestTaskContext:

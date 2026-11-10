@@ -1,1 +1,2 @@
+# 运行时依赖见 pyproject.toml；本文件保留给直接跑源码的用法
 pyyaml>=6.0

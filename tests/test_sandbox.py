@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from pipeline.sandbox import SandboxManager, SandboxCreateError, _sanitize
+from ai_dev_flow.sandbox import SandboxManager, SandboxCreateError, _sanitize
 
 
 class TestSanitize:

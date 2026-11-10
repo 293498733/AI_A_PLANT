@@ -22,7 +22,7 @@ labels: bug
 - 操作系统：
 - Python 版本：
 - goose 版本（`goose --version`）：
-- 触发方式（`python pipeline.py ...` 的完整命令）：
+- 触发方式（`ai-dev-flow ...` 的完整命令）：
 
 ## 报错信息
 

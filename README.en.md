@@ -3,7 +3,7 @@
 > One command drives the full pipeline: requirements → analysis → design → code → review → delivery.
 > Interruptible and resumable, with a human in the loop at every decision point.
 
-**Status**: Active development (v3.9.0) · [中文文档](README.md)
+**Status**: Active development (v3.10.0) · [中文文档](README.md)
 
 ---
 
@@ -32,7 +32,7 @@ throwaway scripts, or teams that refuse any manual confirmation step.
 ## Pipeline overview
 
 ```
-python pipeline.py --project /path/to/your/project
+ai-dev-flow --project /path/to/your/project
 
 Phase 1 ─── requirement refinement (structured requirement doc)
   ⚠ Checkpoint A ─ confirm requirements
@@ -66,7 +66,7 @@ Phase 7 ─── delivery (change list, build verification, review verdict)
 ```bash
 git clone https://github.com/293498733/AI_A_PLANT.git
 cd AI_A_PLANT
-pip install -r requirements.txt
+pip install ai-dev-flow        # or: pip install -r requirements.txt
 
 # supply the API key via environment variable
 export CUSTOM_DEEPSEEK_API_KEY=your_key      # Windows: set CUSTOM_DEEPSEEK_API_KEY=your_key
@@ -75,10 +75,10 @@ export CUSTOM_DEEPSEEK_API_KEY=your_key      # Windows: set CUSTOM_DEEPSEEK_API_
 ### Usage
 
 ```bash
-python pipeline.py                                    # interactive start
-python pipeline.py --project /path/to/project         # target a project directory
-python pipeline.py --project . --from-stage phase3    # start from a specific stage
-python pipeline.py --project . --dry-run              # preview stages without executing
+ai-dev-flow                                          # interactive start
+ai-dev-flow --project /path/to/project               # target a project directory
+ai-dev-flow --project . --from-stage phase3          # start from a specific stage
+ai-dev-flow --project . --dry-run                    # preview stages without executing
 ```
 
 ---
@@ -113,11 +113,11 @@ own 4: retry, fix/skip, write a note and exit, skip/abort.
 
 ```
 ai-dev-flow/
-├── pipeline.py              entry point
-├── pipeline.yaml            stage definitions
-├── pipeline/                orchestration engine
-├── recipes/steps/           AI-stage recipes (9 YAML files)
-├── profiles/                project profile templates
+├── pipeline.py              source-tree launcher (same as the `ai-dev-flow` command)
+├── ai_dev_flow/             orchestration engine package
+│   ├── cli.py               CLI entry point
+│   └── data/                stage definitions, recipes, profile templates (installed with the package)
+├── tests/                   212 tests
 ├── ARCHITECTURE.md          architecture design
 └── CHANGELOG.md             release history
 ```

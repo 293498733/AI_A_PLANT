@@ -7,9 +7,9 @@
 ## 二、三层架构
 
 ```
-CLI 入口 (pipeline.py)     ← argparse，用户交互，--ci 模式
+CLI 入口 (ai_dev_flow/cli.py)  ← argparse，用户交互，--ci 模式
         ↓
-编排引擎 (pipeline/)        ← 状态机、错误处理、检查点、任务图、快照
+编排引擎 (ai_dev_flow/)        ← 状态机、错误处理、检查点、任务图、快照
         ↓
 AI 引擎 (goose CLI)         ← LLM 通信，执行具体任务
 ```
@@ -18,21 +18,21 @@ AI 引擎 (goose CLI)         ← LLM 通信，执行具体任务
 
 | 层 | 文件 | 职责 |
 |----|------|------|
-| CLI | `pipeline.py` | 参数解析、项目初始化、主循环、--ci 模式 |
-| 配置 | `pipeline/config.py` | 加载 pipeline.yaml 和 profile.yml |
-| 状态 | `pipeline/state.py` | .pipeline_stage / .pipeline_note 读写（原子写入） |
-| 执行 | `pipeline/executor.py` | goose CLI 调用封装，Popen 实时输出 |
-| 检查点 | `pipeline/checkpoint.py` | 人工确认交互 + CI 自动跳过 |
-| 错误 | `pipeline/error_handler.py` | 阶段级 + 任务级双层错误处理 + CI 自动决策 |
-| 日志 | `pipeline/logger.py` | 结构化日志，终端+文件双输出 |
-| 阶段定义 | `pipeline.yaml` | 12 阶段列表、参数、状态值 |
-| 任务状态 | `pipeline/task_state.py` | TaskStateManager，依赖拓扑 + 崩溃恢复 + 模块进度 |
-| 上下文 | `pipeline/task_context.py` | ContextAssembler，增量扫描 + 语义摘要 + 文件组装 |
-| 任务图 | `pipeline/task_graph.py` | 任务图执行器，fresh session per task + 知识注入 |
-| Git | `pipeline/git_ops.py` | 自动 commit per task |
-| 快照 | `pipeline/snapshot.py` | SnapshotManager，文件树 hash + 增量变更检测 |
-| 语义摘要 | `pipeline/semantic_summarizer.py` | SemanticSummarizer，8 种语言规则提取，零 AI 成本 |
-| 知识积累 | `pipeline/knowledge_accumulator.py` | KnowledgeAccumulator，Key Decisions 自动提取注入 |
+| CLI | `ai_dev_flow/cli.py` | 参数解析、项目初始化、主循环、--ci 模式 |
+| 配置 | `ai_dev_flow/config.py` | 加载 data/pipeline.yaml 和 profile.yml |
+| 状态 | `ai_dev_flow/state.py` | .pipeline_stage / .pipeline_note 读写（原子写入） |
+| 执行 | `ai_dev_flow/executor.py` | goose CLI 调用封装，Popen 实时输出 |
+| 检查点 | `ai_dev_flow/checkpoint.py` | 人工确认交互 + CI 自动跳过 |
+| 错误 | `ai_dev_flow/error_handler.py` | 阶段级 + 任务级双层错误处理 + CI 自动决策 |
+| 日志 | `ai_dev_flow/logger.py` | 结构化日志，终端+文件双输出 |
+| 阶段定义 | `data/pipeline.yaml` | 12 阶段列表、参数、状态值 |
+| 任务状态 | `ai_dev_flow/task_state.py` | TaskStateManager，依赖拓扑 + 崩溃恢复 + 模块进度 |
+| 上下文 | `ai_dev_flow/task_context.py` | ContextAssembler，增量扫描 + 语义摘要 + 文件组装 |
+| 任务图 | `ai_dev_flow/task_graph.py` | 任务图执行器，fresh session per task + 知识注入 |
+| Git | `ai_dev_flow/git_ops.py` | 自动 commit per task |
+| 快照 | `ai_dev_flow/snapshot.py` | SnapshotManager，文件树 hash + 增量变更检测 |
+| 语义摘要 | `ai_dev_flow/semantic_summarizer.py` | SemanticSummarizer，8 种语言规则提取，零 AI 成本 |
+| 知识积累 | `ai_dev_flow/knowledge_accumulator.py` | KnowledgeAccumulator，Key Decisions 自动提取注入 |
 
 ## 三、状态机
 
@@ -79,7 +79,7 @@ phase0(init) → phase1(refine) → checkpoint_a → phase2(analysis) → checkp
 ## 四、数据流
 
 ```
-pipeline.yaml  ──→ config.py (StageConfig) ──→ pipeline.py (主循环)
+data/pipeline.yaml  ──→ config.py (StageConfig) ──→ cli.py (主循环)
                                                    │
                               ┌──────────────────────┤
                               ▼                      ▼
@@ -96,9 +96,11 @@ pipeline.yaml  ──→ config.py (StageConfig) ──→ pipeline.py (主循�
 
 ```
 ai-dev-flow/
-├── pipeline.py                 ← 入口
-├── pipeline.yaml               ← 阶段定义（数据驱动，12 阶段）
-├── pipeline/                   ← 编排引擎包（15 个模块）
+├── pipeline.py                 ← 源码树启动器（等价 ai-dev-flow 命令）
+├── ai_dev_flow/                ← 编排引擎包（16 个模块）
+│   ├── cli.py                  ← 入口
+│   ├── data/pipeline.yaml      ← 阶段定义（数据驱动，12 阶段）
+│   ├── data/recipes/steps/     ← 10 个 Goose Recipe
 │   ├── __init__.py
 │   ├── config.py
 │   ├── state.py
@@ -112,9 +114,9 @@ ai-dev-flow/
 │   ├── git_ops.py             ← v3.0: Git 自动提交
 │   ├── snapshot.py            ← v3.1: 文件树快照 + 增量变更检测
 │   ├── semantic_summarizer.py ← v3.1: 代码语义结构提取（8 语言）
-│   └── knowledge_accumulator.py ← v3.1: 跨任务知识自动积累
-├── recipes/steps/              ← 10 个 Goose Recipe（+00-init-project.yaml）
-├── profiles/                   ← 项目画像模板
+│   ├── knowledge_accumulator.py ← v3.1: 跨任务知识自动积累
+│   └── data/profiles/          ← 项目画像模板
+├── pyproject.toml              ← 打包配置（发行名 ai-dev-flow）
 ├── CLAUDE.md                   ← 项目说明 + 开发计划 + 进度追踪
 ├── ARCHITECTURE.md             ← 本文件
 ├── README.md                   ← 用户手册
@@ -173,9 +175,9 @@ YAML 支持注释、多行字符串、更少语法噪音。`pipeline.yaml` 的�
 
 ## 八、扩展点
 
-1. **加新阶段**：在 `pipeline.yaml` 的 `stages` 列表中添加条目即可
-2. **加新 Profile**：在 `profiles/` 目录下添加新的 `.yml` 文件
-3. **加新 Recipe**：在 `recipes/steps/` 目录下添加新的 `.yaml` 文件
+1. **加新阶段**：在 `ai_dev_flow/data/pipeline.yaml` 的 `stages` 列表中添加条目即可
+2. **加新 Profile**：在 `ai_dev_flow/data/profiles/` 目录下添加新的 `.yml` 文件
+3. **加新 Recipe**：在 `ai_dev_flow/data/recipes/steps/` 目录下添加新的 `.yaml` 文件
 4. **自定义错误处理**：修改 `error_handler.py` 中的 `Action` 枚举
 5. **CI 模式**：设置 `--ci` 标志，跳过所有 `is_checkpoint` 阶段
 

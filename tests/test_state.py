@@ -1,5 +1,5 @@
 from pathlib import Path
-from pipeline.state import (
+from ai_dev_flow.state import (
     read_stage, write_stage, clear_stage,
     read_note, write_note, clear_note,
     read_task_state, write_task_state,

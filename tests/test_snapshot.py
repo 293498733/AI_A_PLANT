@@ -1,5 +1,5 @@
 from pathlib import Path
-from pipeline.snapshot import SnapshotManager, FileEntry, SnapshotDiff
+from ai_dev_flow.snapshot import SnapshotManager, FileEntry, SnapshotDiff
 
 
 class TestFileEntry:

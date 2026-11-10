@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from dataclasses import dataclass, field
 
-from pipeline.executor import _needs_yaml_quoting
+from ai_dev_flow.executor import _needs_yaml_quoting
 
 logger = logging.getLogger("ai-dev-flow")
 

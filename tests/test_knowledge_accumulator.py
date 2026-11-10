@@ -1,5 +1,5 @@
 from pathlib import Path
-from pipeline.knowledge_accumulator import KnowledgeAccumulator
+from ai_dev_flow.knowledge_accumulator import KnowledgeAccumulator
 
 
 class TestExtractDecisions:

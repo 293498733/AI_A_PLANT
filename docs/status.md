@@ -1,34 +1,35 @@
 # 开发状态追踪
 
-> 最后更新: 2026-11-10 | 当前版本: v3.9.0
+> 最后更新: 2026-11-10 | 当前版本: v3.10.0
 
 ## 模块状态
 
 | 模块 | 状态 | 版本 | 说明 |
 |------|------|------|------|
-| `pipeline/__init__.py` | ✅ | v3.9.0 | 版本号 3.9.0 |
-| `pipeline/logger.py` | ✅ | 完成 | 结构化日志 |
-| `pipeline/state.py` | ✅ | v3.1 | 阶段/任务状态读写（原子写入） |
-| `pipeline/config.py` | ✅ | v3.8 | StageConfig + TaskConfig（verification 字段） |
-| `pipeline/executor.py` | ✅ | v3.8 | Popen + 看门狗 + 线程化 I/O + 循环检测 |
-| `pipeline/checkpoint.py` | ⚠️ 待废弃 | v3.1 | 人工确认（v4.0 废弃） |
-| `pipeline/error_handler.py` | ✅ | v3.1 | 双层级错误处理 + CI 自动决策 |
-| `pipeline/task_state.py` | ✅ | v3.8 | TaskStateManager（三元状态） |
-| `pipeline/task_context.py` | ✅ | v3.1 | ContextAssembler |
-| `pipeline/task_graph.py` | ✅ | v3.8 | 任务图执行器（按类型验证/三元状态/JAVA_HOME 加固/结构化错误） |
-| `pipeline/git_ops.py` | ✅ | v3.2 | Git 自动提交 + commit_files() |
-| `pipeline/snapshot.py` | ✅ | 完成 | SnapshotManager |
-| `pipeline/semantic_summarizer.py` | ✅ | 完成 | 8 语言语义提取 |
-| `pipeline/knowledge_accumulator.py` | ✅ | 完成 | KnowledgeAccumulator |
-| `pipeline/sandbox.py` | ✅ | v3.2 | Git worktree 沙箱管理器 |
-| `pipeline/watchdog.py` | ✅ | v3.2 | 进程看门狗（taskkill /F /T） |
-| `pipeline.py` | ✅ | v3.8 | CLI 入口（前置守卫） |
-| `pipeline.yaml` | ✅ | v3.8 | 12 阶段定义（Phase 5 prerequisite） |
-| Recipe 文件 (9) | ✅ | v3.1 | Phase 0-7 + task-template |
+| `ai_dev_flow/__init__.py` | ✅ | v3.10.0 | 版本号 3.10.0 |
+| `ai_dev_flow/logger.py` | ✅ | 完成 | 结构化日志 |
+| `ai_dev_flow/state.py` | ✅ | v3.1 | 阶段/任务状态读写（原子写入） |
+| `ai_dev_flow/config.py` | ✅ | v3.8 | StageConfig + TaskConfig（verification 字段） |
+| `ai_dev_flow/executor.py` | ✅ | v3.8 | Popen + 看门狗 + 线程化 I/O + 循环检测 |
+| `ai_dev_flow/checkpoint.py` | ⚠️ 待废弃 | v3.1 | 人工确认（v4.0 废弃） |
+| `ai_dev_flow/error_handler.py` | ✅ | v3.1 | 双层级错误处理 + CI 自动决策 |
+| `ai_dev_flow/task_state.py` | ✅ | v3.8 | TaskStateManager（三元状态） |
+| `ai_dev_flow/task_context.py` | ✅ | v3.1 | ContextAssembler |
+| `ai_dev_flow/task_graph.py` | ✅ | v3.8 | 任务图执行器（按类型验证/三元状态/JAVA_HOME 加固/结构化错误） |
+| `ai_dev_flow/git_ops.py` | ✅ | v3.2 | Git 自动提交 + commit_files() |
+| `ai_dev_flow/snapshot.py` | ✅ | 完成 | SnapshotManager |
+| `ai_dev_flow/semantic_summarizer.py` | ✅ | 完成 | 8 语言语义提取 |
+| `ai_dev_flow/knowledge_accumulator.py` | ✅ | 完成 | KnowledgeAccumulator |
+| `ai_dev_flow/sandbox.py` | ✅ | v3.2 | Git worktree 沙箱管理器 |
+| `ai_dev_flow/watchdog.py` | ✅ | v3.2 | 进程看门狗（taskkill /F /T） |
+| `ai_dev_flow/cli.py` | ✅ | v3.10 | CLI 入口（前置守卫，console script） |
+| `ai_dev_flow/data/pipeline.yaml` | ✅ | v3.8 | 12 阶段定义（Phase 5 prerequisite） |
+| Recipe 文件 (9) | ✅ | v3.1 | `data/recipes/steps/`，Phase 0-7 + task-template |
 | `tests/` (15 文件) | ✅ | v3.9.0 | 212 测试覆盖全模块 |
 | `.github/workflows/test.yml` | ✅ | 完成 | GitHub Actions CI |
 | `LICENSE` | ✅ | v3.9 | MIT 许可证 |
 | `README.en.md` | ✅ | v3.9 | 英文用户手册 |
+| `pyproject.toml` | ✅ | v3.10 | 打包配置（`ai-dev-flow`，console script） |
 
 ## 已修复 Bug
 

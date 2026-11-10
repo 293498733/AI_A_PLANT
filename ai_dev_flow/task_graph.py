@@ -18,19 +18,21 @@ from pathlib import Path
 from itertools import groupby
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from pipeline.config import TaskConfig, load_task_graph, load_profile
-from pipeline.task_state import (
+from ai_dev_flow.config import TaskConfig, load_task_graph, load_profile
+from ai_dev_flow.task_state import (
     TaskStateManager, STATUS_PENDING, STATUS_COMPLETED,
     STATUS_CODE_PRODUCED, STATUS_FAILED_NO_OUTPUT,
     STATUS_FAILED, STATUS_SKIPPED,
 )
-from pipeline.task_context import ContextAssembler
-from pipeline.snapshot import SnapshotManager
-from pipeline.knowledge_accumulator import KnowledgeAccumulator
-from pipeline.git_ops import GitOps
-from pipeline.executor import run_task, detect_jdk, JdkNotFound
-from pipeline.error_handler import handle_task_error, TaskAction
-from pipeline.sandbox import SandboxManager, SandboxCreateError
+from ai_dev_flow.task_context import ContextAssembler
+from ai_dev_flow.snapshot import SnapshotManager
+from ai_dev_flow.knowledge_accumulator import KnowledgeAccumulator
+from ai_dev_flow.git_ops import GitOps
+from ai_dev_flow.executor import run_task, detect_jdk, JdkNotFound
+from ai_dev_flow.error_handler import handle_task_error, TaskAction
+from ai_dev_flow.sandbox import SandboxManager, SandboxCreateError
+
+DATA_DIR = Path(__file__).resolve().parent / "data"
 
 logger = logging.getLogger("ai-dev-flow")
 
@@ -70,7 +72,7 @@ def execute_task_graph(
         return False, {}
 
     # 检查 task_state.json 是否有上次运行残留的不一致条目
-    from pipeline.state import read_task_state as _read_ts
+    from ai_dev_flow.state import read_task_state as _read_ts
     _existing = _read_ts(ai_dev_dir) or {}
     _stale = [tid for tid in _existing if tid not in task_ids]
     if _stale:
@@ -80,7 +82,7 @@ def execute_task_graph(
         )
         for tid in _stale:
             del _existing[tid]
-        from pipeline.state import write_task_state as _write_ts
+        from ai_dev_flow.state import write_task_state as _write_ts
         _write_ts(ai_dev_dir, _existing)
 
     # 初始化状态管理器
@@ -123,7 +125,7 @@ def execute_task_graph(
 
     lock = threading.Lock()
     total = len(graph.tasks)
-    task_recipe_path = str(Path(__file__).resolve().parent.parent / task_recipe)
+    task_recipe_path = str(DATA_DIR / task_recipe)
 
     # 加载 profile（供各任务按类型解析验证步骤）
     profile = load_profile(profile_path) or {}

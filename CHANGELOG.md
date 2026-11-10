@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-11-10
+
+发布到 PyPI：包重命名以避开同名冲突，数据文件随包分发，新增 console script。
+
+### Added
+
+- `pyproject.toml`：发行名 `ai-dev-flow`，console script `ai-dev-flow`，`python -m ai_dev_flow` 亦可。
+- `ai_dev_flow/__main__.py`：模块入口。
+- `pipeline.py`（根目录）保留为三行启动器，`python pipeline.py` 用法不变。
+
+### Changed — **破坏性**
+
+- 顶层包 `pipeline` 重命名为 `ai_dev_flow`。原因：PyPI 上已存在同名的 `pipeline` 包，安装后会与本项目互相覆盖。所有 import 路径随之改变（`from pipeline.x` → `from ai_dev_flow.x`）。
+- `pipeline.yaml` / `recipes/` / `profiles/` 移入 `ai_dev_flow/data/`，作为包数据随 wheel 一起安装；此前从源码根目录解析，`pip install` 后必然找不到。
+- 文档、CI 模板中的命令示例统一改为 `ai-dev-flow`。
+
+### 升级注意
+
+从源码树运行的用法不变（`python pipeline.py`）。若你在代码里 `from pipeline import ...`，改为 `from ai_dev_flow import ...`。
+
 ## [3.9.0] - 2026-11-10
 
 开源发布准备：补齐许可证与英文文档，清理一个失效 CLI 参数。

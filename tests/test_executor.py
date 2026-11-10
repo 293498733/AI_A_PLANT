@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.executor import (
+from ai_dev_flow.executor import (
     build_params, check_goose, run_stage, GooseError, GooseNotFound,
     detect_jdk, JdkNotFound, _parse_javac_version,
 )
@@ -102,7 +102,7 @@ class TestRunWithWatchdog:
             pass
 
     def _patch_executor(self, mocker, triggered, returncode=0):
-        from pipeline import executor
+        from ai_dev_flow import executor
 
         proc = self._FakeProc(returncode)
         triggered_flag = triggered

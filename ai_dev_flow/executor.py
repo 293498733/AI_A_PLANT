@@ -12,7 +12,7 @@ import sys
 from collections import deque
 from pathlib import Path
 
-from pipeline.watchdog import ProcessWatchdog
+from ai_dev_flow.watchdog import ProcessWatchdog
 
 logger = logging.getLogger("ai-dev-flow")
 

@@ -1,5 +1,5 @@
-from pipeline.checkpoint import confirm, preview, ask_boolean, set_ci_mode
-from pipeline.error_handler import (
+from ai_dev_flow.checkpoint import confirm, preview, ask_boolean, set_ci_mode
+from ai_dev_flow.error_handler import (
     handle_error, handle_task_error, Action, TaskAction, set_ci_mode as set_error_ci,
 )
 from pathlib import Path

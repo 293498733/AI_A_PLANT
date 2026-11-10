@@ -5,8 +5,8 @@ from pathlib import Path
 @pytest.fixture
 def ci_mode():
     """Set ci_mode=True for both checkpoint and error_handler. Reset after test."""
-    from pipeline.checkpoint import set_ci_mode as set_ci_checkpoint
-    from pipeline.error_handler import set_ci_mode as set_ci_error
+    from ai_dev_flow.checkpoint import set_ci_mode as set_ci_checkpoint
+    from ai_dev_flow.error_handler import set_ci_mode as set_ci_error
     set_ci_checkpoint(True)
     set_ci_error(True)
     yield

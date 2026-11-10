@@ -1,4 +1,4 @@
-from pipeline.task_state import (
+from ai_dev_flow.task_state import (
     TaskStateManager, STATUS_PENDING, STATUS_READY, STATUS_IN_PROGRESS,
     STATUS_COMPLETED, STATUS_FAILED, STATUS_SKIPPED,
 )
@@ -14,7 +14,7 @@ class TestTaskStateManagerInit:
         assert mgr.tasks["t1"]["started_at"] is None
 
     def test_merges_existing_state(self, temp_ai_dev_dir):
-        from pipeline.state import write_task_state
+        from ai_dev_flow.state import write_task_state
         write_task_state(temp_ai_dev_dir, {
             "t1": {"status": STATUS_COMPLETED, "started_at": None,
                    "completed_at": "2026-01-01", "retries": 0,

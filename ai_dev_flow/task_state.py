@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from pipeline.state import read_task_state as _read, write_task_state as _write
+from ai_dev_flow.state import read_task_state as _read, write_task_state as _write
 
 logger = logging.getLogger("ai-dev-flow")
 
