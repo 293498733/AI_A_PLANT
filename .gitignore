@@ -35,3 +35,6 @@ temp/
 # 环境变量
 .env
 .env.local
+
+# DSH 审查标记（dsh_gate.py 自动维护，不入库）
+.dsh/
