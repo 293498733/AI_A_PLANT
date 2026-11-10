@@ -25,7 +25,7 @@
 | `pipeline.py` | ✅ | v3.8 | CLI 入口（前置守卫） |
 | `pipeline.yaml` | ✅ | v3.8 | 12 阶段定义（Phase 5 prerequisite） |
 | Recipe 文件 (9) | ✅ | v3.1 | Phase 0-7 + task-template |
-| `tests/` (15 文件) | ✅ | v3.8.1 | 212 测试覆盖全模块 |
+| `tests/` (15 文件) | ✅ | v3.9.0 | 212 测试覆盖全模块 |
 | `.github/workflows/test.yml` | ✅ | 完成 | GitHub Actions CI |
 | `LICENSE` | ✅ | v3.9 | MIT 许可证 |
 | `README.en.md` | ✅ | v3.9 | 英文用户手册 |
