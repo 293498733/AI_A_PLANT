@@ -5,7 +5,6 @@
     python pipeline.py                          # 交互式启动
     python pipeline.py --project D:/MyPrj/xxx  # 指定项目路径
     python pipeline.py --project ./foo --git-url https://github.com/user/repo.git  # 自动 clone
-    python pipeline.py --resume                # 从断点恢复
     python pipeline.py --from-stage phase3     # 从指定阶段开始
     python pipeline.py --dry-run               # 预览将执行的阶段
 """
@@ -189,7 +188,6 @@ def main():
     parser.add_argument("--git-url", help="远程仓库地址（项目目录不存在时自动 clone）")
     parser.add_argument("--git-branch", help="clone 时指定分支（配合 --git-url 使用）")
     parser.add_argument("--req", "-r", help="需求文件路径")
-    parser.add_argument("--resume", action="store_true", help="从断点恢复")
     parser.add_argument("--new", dest="new_run", action="store_true", help="全新运行，清除旧的 .ai-dev 产出")
     parser.add_argument("--from-stage", dest="from_stage", help="从指定阶段开始")
     parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际执行")

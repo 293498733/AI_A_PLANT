@@ -1,12 +1,12 @@
 # 开发状态追踪
 
-> 最后更新: 2026-10-23 | 当前版本: v3.8.1
+> 最后更新: 2026-11-10 | 当前版本: v3.9.0
 
 ## 模块状态
 
 | 模块 | 状态 | 版本 | 说明 |
 |------|------|------|------|
-| `pipeline/__init__.py` | ✅ | v3.8.1 | 版本号 3.8.1 |
+| `pipeline/__init__.py` | ✅ | v3.9.0 | 版本号 3.9.0 |
 | `pipeline/logger.py` | ✅ | 完成 | 结构化日志 |
 | `pipeline/state.py` | ✅ | v3.1 | 阶段/任务状态读写（原子写入） |
 | `pipeline/config.py` | ✅ | v3.8 | StageConfig + TaskConfig（verification 字段） |
@@ -27,6 +27,8 @@
 | Recipe 文件 (9) | ✅ | v3.1 | Phase 0-7 + task-template |
 | `tests/` (15 文件) | ✅ | v3.8.1 | 212 测试覆盖全模块 |
 | `.github/workflows/test.yml` | ✅ | 完成 | GitHub Actions CI |
+| `LICENSE` | ✅ | v3.9 | MIT 许可证 |
+| `README.en.md` | ✅ | v3.9 | 英文用户手册 |
 
 ## 已修复 Bug
 

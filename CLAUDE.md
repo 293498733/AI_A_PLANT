@@ -8,7 +8,7 @@
 
 ## 项目定位
 
-**AI Dev Flow** — AI 驱动的全流程软件开发管线，当前版本 **v3.8.1**。
+**AI Dev Flow** — AI 驱动的全流程软件开发管线，当前版本 **v3.9.0**。
 
 - **入口**: `python pipeline.py --project <目标项目路径>`
 - **技术栈**: Python 3.9+（编排）+ Goose CLI（AI 引擎）+ YAML Recipe（阶段/任务定义）
@@ -37,7 +37,9 @@
 ## 文档索引
 
 - `ARCHITECTURE.md` — 架构设计文档
-- `README.md` — 用户手册
+- `README.md` — 用户手册（中文，主入口）
+- `README.en.md` — 英文README
+- `LICENSE` — MIT 许可证
 - `CONTRIBUTING.md` — 贡献指南（环境、测试、提交规范、PR 流程）
 - `CHANGELOG.md` — 版本变更记录
 - `docs/FAQ.md` — 常见问题

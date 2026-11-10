@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-11-10
+
+开源发布准备：补齐许可证与英文文档，清理一个失效 CLI 参数。
+
+### Added
+
+- `LICENSE`（MIT）：此前 README 声明 MIT 但仓库无许可证文件，GitHub 无法识别。
+- `README.en.md`：英文用户手册，覆盖定位、流程、安装、核心机制、配置项。
+
+### Removed
+
+- `--resume` 参数（`pipeline.py`）：自 v3.1 起从未被代码读取，阶段恢复始终自动进行。源码 docstring 与 `--help` 文本同步修正，`docs/FAQ.md` 对应条目更新为「已移除」。
+
+### Changed
+
+- README 增加中英文互链与 `LICENSE` 链接。
+
 ## [3.8.1] - 2026-10-23
 
 测试覆盖补全，无功能变更。

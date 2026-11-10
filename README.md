@@ -3,7 +3,7 @@
 > 一条命令驱动「需求→分析→方案→编码→审查→交付」的完整开发管线。
 > 中断可恢复，失败可介入，全过程可追溯。
 
-**Status**: Active development (v3.8.1)
+**Status**: Active development (v3.9.0) · [English](README.en.md)
 
 ---
 
@@ -156,4 +156,4 @@ ai-dev-flow/
 
 ## 许可证
 
-MIT
+MIT — 见 [LICENSE](LICENSE)。
