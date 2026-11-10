@@ -20,6 +20,12 @@
 - `pipeline.yaml` / `recipes/` / `profiles/` 移入 `ai_dev_flow/data/`，作为包数据随 wheel 一起安装；此前从源码根目录解析，`pip install` 后必然找不到。
 - 文档、CI 模板中的命令示例统一改为 `ai-dev-flow`。
 
+### Fixed
+
+- 空任务图时选择「跳过」未持久化阶段状态，重跑会再次卡在同一处（其余 SKIP 分支均写状态）。
+- `--new` 清理输出时目录名永远不带 `/` 后缀（删除后才判定 `is_dir()`）。
+- JDK 检测块 `except Exception: pass` 会吞掉 `profile.yml` 解析错误，改为记录警告。
+
 ### 升级注意
 
 从源码树运行的用法不变（`python pipeline.py`）。若你在代码里 `from pipeline import ...`，改为 `from ai_dev_flow import ...`。

@@ -91,11 +91,12 @@ def _clean_outputs(AD: Path, OUT: Path) -> None:
         if entry.name in KEEP:
             continue
         try:
-            if entry.is_dir():
+            was_dir = entry.is_dir()
+            if was_dir:
                 _shutil.rmtree(entry)
             else:
                 entry.unlink()
-            cleaned.append(entry.name + ("/" if entry.is_dir() else ""))
+            cleaned.append(entry.name + ("/" if was_dir else ""))
         except Exception as e:
             print(f"  警告: 无法删除 {entry.name}: {e}")
 
@@ -273,8 +274,8 @@ def main():
         print(f"  JDK 检测: {jdk_home}")
     except JdkNotFound as e:
         logger.warning(str(e))
-    except Exception:
-        pass  # profile 可能还不存在，Phase 0 会生成
+    except Exception as e:
+        logger.warning(f"JDK 检测跳过（profile 尚未生成或无法解析）: {e}")
 
     # 检查 API Key
     api_key = os.environ.get("CUSTOM_DEEPSEEK_API_KEY")
@@ -421,8 +422,9 @@ def main():
                 print(f"  {e}")
                 action = handle_error(AD)
                 if action == Action.SKIP:
+                    write_stage(AD, stage.state_value)
                     elapsed = time.time() - task_start
-                    stage_times.append((stage.name, elapsed, "❌ 空任务图"))
+                    stage_times.append((stage.name, elapsed, "⚠️ 跳过（空任务图）"))
                     continue
                 else:
                     return
